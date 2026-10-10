@@ -332,6 +332,12 @@ static int Sprite_new(lua_State *L) {
     lua_pushcfunction(L, [](lua_State *st) -> int { lua_pushinteger(st, 0); return 1; }); lua_setfield(L, -2, "GetFrame");
     lua_pushcfunction(L, [](lua_State *st) -> int { lua_pushstring(st, ""); return 1; }); lua_setfield(L, -2, "GetFilename");
     lua_pushcfunction(L, dummyFunc); lua_setfield(L, -2, "Colorize");
+    lua_pushcfunction(L, [](lua_State *st) -> int { lua_pushboolean(st, 0); return 1; }); lua_setfield(L, -2, "IsEventTriggered");
+    lua_pushcfunction(L, [](lua_State *st) -> int { lua_pushboolean(st, 1); return 1; }); lua_setfield(L, -2, "IsLoaded");
+    lua_pushcfunction(L, dummyFunc); lua_setfield(L, -2, "SetColorize");
+    lua_pushcfunction(L, dummyFunc); lua_setfield(L, -2, "SetLayerFrame");
+    lua_pushcfunction(L, dummyFunc); lua_setfield(L, -2, "Stop");
+    lua_pushcfunction(L, [](lua_State *st) -> int { PushVector(st, 0.0f, 0.0f); return 1; }); lua_setfield(L, -2, "GetTexel");
     return 1;
 }
 
@@ -692,7 +698,19 @@ static int Player_SetActiveCharge(lua_State *L) {
     return 0;
 }
 
+static int g_playerTypeOverride = -1;
+
+static int Player_ChangePlayerType(lua_State *L) {
+    int newType = static_cast<int>(luaL_checkinteger(L, 2));
+    g_playerTypeOverride = newType;
+    return 0;
+}
+
 static int Player_GetPlayerType(lua_State *L) {
+    if (g_playerTypeOverride >= 0) {
+        lua_pushinteger(L, g_playerTypeOverride);
+        return 1;
+    }
     uintptr_t p = CheckEntityPtr(L, 1);
     lua_pushinteger(L, p ? RepogonPlayerGetType(p) : 0);
     return 1;
@@ -822,6 +840,8 @@ static int Room_GetGridEntity(lua_State *L) { lua_pushnil(L); return 1; }
 static int Room_GetRenderScrollOffset(lua_State *L) { PushVector(L, 0.0f, 0.0f); return 1; }
 static int Room_IsCurrentRoomLastBoss(lua_State *L) { lua_pushboolean(L, 0); return 1; }
 static int Room_GetRoomConfigStage(lua_State *L) { lua_pushinteger(L, 1); return 1; }
+static int Room_IsAmbushActive(lua_State *L) { lua_pushboolean(L, 0); return 1; }
+static int Room_IsAmbushDone(lua_State *L) { lua_pushboolean(L, 1); return 1; }
 
 void PushRoom(lua_State *L, uintptr_t room) {
     lua_newtable(L);
@@ -1355,6 +1375,13 @@ static int Isaac_GridSpawn(lua_State *L) {
 static int Isaac_ExecuteCommand(lua_State *L) {
     const char *cmd = luaL_optstring(L, 1, "");
     RepogonLog(@"Isaac.ExecuteCommand: %s", cmd);
+    if (cmd && strncmp(cmd, "carmode", 7) == 0) {
+        g_playerTypeOverride = 41;
+        RepogonLog(@"[Repogon] Switched playerTypeOverride to 41 (Car) via console command!");
+    } else if (cmd && strncmp(cmd, "resetcarmode", 12) == 0) {
+        g_playerTypeOverride = -1;
+        RepogonLog(@"[Repogon] Reset playerTypeOverride");
+    }
     lua_pushstring(L, "");
     return 1;
 }
@@ -1690,6 +1717,7 @@ BitSet128 = function(l, h)
     return setmetatable({ l = l or 0, h = h or 0 }, BitSet128_mt)
 end
 
+local enum_next_ids = setmetatable({}, { __mode = "k" })
 local enum_meta = {
     __index = function(t, k)
         if k == 'NUM_PILLS' then return 25 end
@@ -1697,14 +1725,14 @@ local enum_meta = {
         if k == 'NUM_TRINKETS' then return 189 end
         if k == 'NUM_COLLECTIBLES' then return 732 end
         if type(k) == 'number' then return k end
-        local val = rawget(t, '__next_id') or 100
-        rawset(t, '__next_id', val + 1)
+        local val = enum_next_ids[t] or 100
+        enum_next_ids[t] = val + 1
         rawset(t, k, val)
         return val
     end
 }
 
-local function make_enum(tbl)
+function make_enum(tbl)
     return setmetatable(tbl or {}, enum_meta)
 end
 
@@ -1764,8 +1792,96 @@ EffectVariant = make_enum({
 })
 Direction = make_enum({ NO_DIRECTION = -1 })
 ButtonAction = make_enum({ ACTION_NULL = -1 })
-Keyboard = make_enum({ KEY_NULL = 0 })
-Controller = make_enum({})
+Keyboard = make_enum({
+    KEY_NULL = 0,
+    KEY_SPACE = 32,
+    KEY_APOSTROPHE = 39,
+    KEY_COMMA = 44,
+    KEY_MINUS = 45,
+    KEY_PERIOD = 46,
+    KEY_SLASH = 47,
+    KEY_0 = 48, KEY_1 = 49, KEY_2 = 50, KEY_3 = 51, KEY_4 = 52,
+    KEY_5 = 53, KEY_6 = 54, KEY_7 = 55, KEY_8 = 56, KEY_9 = 57,
+    KEY_SEMICOLON = 59,
+    KEY_EQUAL = 61,
+    KEY_A = 65, KEY_B = 66, KEY_C = 67, KEY_D = 68, KEY_E = 69,
+    KEY_F = 70, KEY_G = 71, KEY_H = 72, KEY_I = 73, KEY_J = 74,
+    KEY_K = 75, KEY_L = 76, KEY_M = 77, KEY_N = 78, KEY_O = 79,
+    KEY_P = 80, KEY_Q = 81, KEY_R = 82, KEY_S = 83, KEY_T = 84,
+    KEY_U = 85, KEY_V = 86, KEY_W = 87, KEY_X = 88, KEY_Y = 89, KEY_Z = 90,
+    KEY_LEFT_BRACKET = 91,
+    KEY_BACKSLASH = 92,
+    KEY_RIGHT_BRACKET = 93,
+    KEY_GRAVE_ACCENT = 96,
+    KEY_ESCAPE = 256,
+    KEY_ENTER = 257,
+    KEY_TAB = 258,
+    KEY_BACKSPACE = 259,
+    KEY_INSERT = 260,
+    KEY_DELETE = 261,
+    KEY_RIGHT = 262,
+    KEY_LEFT = 263,
+    KEY_DOWN = 264,
+    KEY_UP = 265,
+    KEY_PAGE_UP = 266,
+    KEY_PAGE_DOWN = 267,
+    KEY_HOME = 268,
+    KEY_END = 269,
+    KEY_CAPS_LOCK = 280,
+    KEY_SCROLL_LOCK = 281,
+    KEY_NUM_LOCK = 282,
+    KEY_PRINT_SCREEN = 283,
+    KEY_PAUSE = 284,
+    KEY_F1 = 290, KEY_F2 = 291, KEY_F3 = 292, KEY_F4 = 293,
+    KEY_F5 = 294, KEY_F6 = 295, KEY_F7 = 296, KEY_F8 = 297,
+    KEY_F9 = 298, KEY_F10 = 299, KEY_F11 = 300, KEY_F12 = 301,
+    KEY_KP_0 = 320, KEY_KP_1 = 321, KEY_KP_2 = 322, KEY_KP_3 = 323, KEY_KP_4 = 324,
+    KEY_KP_5 = 325, KEY_KP_6 = 326, KEY_KP_7 = 327, KEY_KP_8 = 328, KEY_KP_9 = 329,
+    KEY_KP_DECIMAL = 330,
+    KEY_KP_DIVIDE = 331,
+    KEY_KP_MULTIPLY = 332,
+    KEY_KP_SUBTRACT = 333,
+    KEY_KP_ADD = 334,
+    KEY_KP_ENTER = 335,
+    KEY_KP_EQUAL = 336,
+    KEY_LEFT_SHIFT = 340,
+    KEY_LEFT_CONTROL = 341,
+    KEY_LEFT_ALT = 342,
+    KEY_LEFT_SUPER = 343,
+    KEY_RIGHT_SHIFT = 344,
+    KEY_RIGHT_CONTROL = 345,
+    KEY_RIGHT_ALT = 346,
+    KEY_RIGHT_SUPER = 347,
+    KEY_MENU = 348
+})
+Controller = make_enum({
+    BUTTON_A = 0,
+    BUTTON_B = 1,
+    BUTTON_X = 2,
+    BUTTON_Y = 3,
+    BUTTON_LEFT_BUMPER = 4,
+    BUTTON_RIGHT_BUMPER = 5,
+    BUTTON_BACK = 6,
+    BUTTON_START = 7,
+    BUTTON_GUIDE = 8,
+    BUTTON_LEFT_STICK = 9,
+    BUTTON_RIGHT_STICK = 10,
+    BUTTON_DPAD_UP = 11,
+    BUTTON_DPAD_RIGHT = 12,
+    BUTTON_DPAD_DOWN = 13,
+    BUTTON_DPAD_LEFT = 14
+})
+LevelCurse = make_enum({
+    CURSE_NONE = 0,
+    CURSE_OF_DARKNESS = 1,
+    CURSE_OF_THE_LABYRINTH = 2,
+    CURSE_OF_THE_LOST = 4,
+    CURSE_OF_THE_UNKNOWN = 8,
+    CURSE_OF_THE_CURSED = 16,
+    CURSE_OF_MAZE = 32,
+    CURSE_OF_BLIND = 64,
+    CURSE_OF_GIANT = 128
+})
 SoundEffect = make_enum({ SOUND_NULL = 0 })
 Music = make_enum({ MUSIC_NULL = 0 })
 LevelStage = make_enum({ STAGE_NULL = 0 })
@@ -1780,7 +1896,49 @@ TearFlag = make_enum({
 TearVariant = make_enum({ BLUE = 0 })
 BombVariant = make_enum({ BOMB_NORMAL = 0 })
 BabySubType = make_enum({ BABY_UNASSIGNED = 0 })
-PlayerType = make_enum({ PLAYER_ISAAC = 0 })
+PlayerType = make_enum({
+    PLAYER_ISAAC = 0,
+    PLAYER_MAGDALENE = 1,
+    PLAYER_CAIN = 2,
+    PLAYER_JUDAS = 3,
+    PLAYER_BLUEBABY = 4,
+    PLAYER_EVE = 5,
+    PLAYER_SAMSON = 6,
+    PLAYER_AZAZEL = 7,
+    PLAYER_LAZARUS = 8,
+    PLAYER_EDEN = 9,
+    PLAYER_THELOST = 10,
+    PLAYER_LAZARUS2 = 11,
+    PLAYER_BLACKJUDAS = 12,
+    PLAYER_LILITH = 13,
+    PLAYER_KEEPER = 14,
+    PLAYER_APOLLYON = 15,
+    PLAYER_FORGOTTEN = 16,
+    PLAYER_THESOUL = 17,
+    PLAYER_BETHANY = 18,
+    PLAYER_JACOB = 19,
+    PLAYER_ESAU = 20,
+    PLAYER_ISAAC_B = 21,
+    PLAYER_MAGDALENE_B = 22,
+    PLAYER_CAIN_B = 23,
+    PLAYER_JUDAS_B = 24,
+    PLAYER_BLUEBABY_B = 25,
+    PLAYER_EVE_B = 26,
+    PLAYER_SAMSON_B = 27,
+    PLAYER_AZAZEL_B = 28,
+    PLAYER_LAZARUS_B = 29,
+    PLAYER_EDEN_B = 30,
+    PLAYER_THELOST_B = 31,
+    PLAYER_LILITH_B = 32,
+    PLAYER_KEEPER_B = 33,
+    PLAYER_APOLLYON_B = 34,
+    PLAYER_FORGOTTEN_B = 35,
+    PLAYER_BETHANY_B = 36,
+    PLAYER_JACOB_B = 37,
+    PLAYER_LAZARUS2_B = 38,
+    PLAYER_JACOB2_B = 39,
+    PLAYER_THESOUL_B = 40
+})
 LaserSubType = make_enum({})
 DamageFlag = make_enum({})
 UseFlag = make_enum({})
@@ -1871,7 +2029,7 @@ Input = {
     IsActionTriggered = function(a, p) return false end,
     IsButtonPressed = function(b, c) return false end,
     IsButtonTriggered = function(b, c) return false end,
-    GetMousePosition = function(r) return { X = 0, Y = 0, x = 0, y = 0 } end
+    GetMousePosition = function(r) return Vector(0, 0) end
 }
 
 MusicManager = function()
@@ -1904,6 +2062,7 @@ SFXManager = function()
     function sfx:IsPlaying(id) return false end
     function sfx:AdjustPitch(id, pitch) end
     function sfx:AdjustVolume(id, vol) end
+    function sfx:UpdateVolume() end
     return sfx
 end
 
@@ -2055,6 +2214,7 @@ Game = setmetatable({}, {
     lua_pushcfunction(g_L, Player_GetActiveCharge); lua_setfield(g_L, -2, "GetActiveCharge");
     lua_pushcfunction(g_L, Player_SetActiveCharge); lua_setfield(g_L, -2, "SetActiveCharge");
     lua_pushcfunction(g_L, Player_GetPlayerType); lua_setfield(g_L, -2, "GetPlayerType");
+    lua_pushcfunction(g_L, Player_ChangePlayerType); lua_setfield(g_L, -2, "ChangePlayerType");
     lua_pushcfunction(g_L, Player_GetName); lua_setfield(g_L, -2, "GetName");
     lua_pushcfunction(g_L, Player_HasCollectible); lua_setfield(g_L, -2, "HasCollectible");
     lua_pushcfunction(g_L, Player_GetEffects); lua_setfield(g_L, -2, "GetEffects");
@@ -2126,6 +2286,8 @@ Game = setmetatable({}, {
     lua_pushcfunction(g_L, Room_GetRenderScrollOffset); lua_setfield(g_L, -2, "GetRenderScrollOffset");
     lua_pushcfunction(g_L, Room_IsCurrentRoomLastBoss); lua_setfield(g_L, -2, "IsCurrentRoomLastBoss");
     lua_pushcfunction(g_L, Room_GetRoomConfigStage); lua_setfield(g_L, -2, "GetRoomConfigStage");
+    lua_pushcfunction(g_L, Room_IsAmbushActive); lua_setfield(g_L, -2, "IsAmbushActive");
+    lua_pushcfunction(g_L, Room_IsAmbushDone); lua_setfield(g_L, -2, "IsAmbushDone");
     lua_pushvalue(g_L, -1); lua_setfield(g_L, -2, "__index");
     lua_pop(g_L, 1);
 
@@ -2279,6 +2441,9 @@ Game = setmetatable({}, {
     lua_pushboolean(g_L, 1); lua_setglobal(g_L, "REPENTANCE_PLUS");
     lua_pushboolean(g_L, 1); lua_setglobal(g_L, "REPENTOGON");
     lua_pushstring(g_L, "1.0.0-ios"); lua_setglobal(g_L, "REPENTOGON_VERSION");
+
+    // Wrap dynamic enums
+    luaL_dostring(g_L, "if make_enum then ModCallbacks = make_enum(ModCallbacks) EntityType = make_enum(EntityType) PickupVariant = make_enum(PickupVariant) end");
 
     RepogonLog(@"RepogonLua runtime initialized successfully.");
     return true;

@@ -177,23 +177,98 @@ void RepogonXMLMergerProcessMods(const std::vector<std::string> &modDirs) {
     NSFileManager *fm = [NSFileManager defaultManager];
     [fm createDirectoryAtPath:cacheDir withIntermediateDirectories:YES attributes:nil error:nil];
 
+    // Clean up any stale dangerous merged XML files that cause mobile engine bounds crash
+    [fm removeItemAtPath:[cacheDir stringByAppendingPathComponent:@"players.xml"] error:nil];
+    [fm removeItemAtPath:[cacheDir stringByAppendingPathComponent:@"entities2.xml"] error:nil];
+    [fm removeItemAtPath:[cacheDir stringByAppendingPathComponent:@"items.xml"] error:nil];
+    [fm removeItemAtPath:[cacheDir stringByAppendingPathComponent:@"costumes2.xml"] error:nil];
+
+    int customPlayerId = 41;
+    int customSoundId = 1001;
+    int customMusicId = 101;
+
+    // Scan mods in-memory for custom player types and entity variants without altering base XML files
+    for (const auto &mDir : modDirs) {
+        NSString *modPath = [NSString stringWithUTF8String:mDir.c_str()];
+
+        // 1. In-memory player registration (e.g. Car -> 41)
+        NSArray *pCands = @[
+            [modPath stringByAppendingPathComponent:@"content/players.xml"],
+            [modPath stringByAppendingPathComponent:@"resources/players.xml"],
+            [modPath stringByAppendingPathComponent:@"players.xml"]
+        ];
+        for (NSString *cand in pCands) {
+            if ([fm fileExistsAtPath:cand]) {
+                NSString *content = [NSString stringWithContentsOfFile:cand encoding:NSUTF8StringEncoding error:nil];
+                if (content) {
+                    NSRegularExpression *playerRegex = [NSRegularExpression regularExpressionWithPattern:@"<player\\b[^>]*\\bname=\"([^\"]+)\"" options:NSRegularExpressionCaseInsensitive error:nil];
+                    NSArray *matches = [playerRegex matchesInString:content options:0 range:NSMakeRange(0, content.length)];
+                    for (NSTextCheckingResult *match in matches) {
+                        if (match.numberOfRanges > 1) {
+                            NSString *pName = [content substringWithRange:[match rangeAtIndex:1]];
+                            std::string lowerName = [pName.lowercaseString UTF8String];
+                            if (g_playerTypeMap.find(lowerName) == g_playerTypeMap.end()) {
+                                g_playerTypeMap[lowerName] = customPlayerId++;
+                                RepogonLog(@"[XMLMerger] Registered Custom PlayerType (in-memory): %@ -> %d", pName, g_playerTypeMap[lowerName]);
+                            }
+                        }
+                    }
+                }
+                break;
+            }
+        }
+
+        // 2. In-memory entity registration (e.g. carchara -> variant 2327)
+        NSArray *eCands = @[
+            [modPath stringByAppendingPathComponent:@"content/entities2.xml"],
+            [modPath stringByAppendingPathComponent:@"resources/entities2.xml"],
+            [modPath stringByAppendingPathComponent:@"entities2.xml"]
+        ];
+        for (NSString *cand in eCands) {
+            if ([fm fileExistsAtPath:cand]) {
+                NSString *content = [NSString stringWithContentsOfFile:cand encoding:NSUTF8StringEncoding error:nil];
+                if (content) {
+                    NSRegularExpression *entRegex = [NSRegularExpression regularExpressionWithPattern:@"<entity\\b([^>]+)>" options:NSRegularExpressionCaseInsensitive error:nil];
+                    NSArray *entMatches = [entRegex matchesInString:content options:0 range:NSMakeRange(0, content.length)];
+                    for (NSTextCheckingResult *m in entMatches) {
+                        if (m.numberOfRanges > 1) {
+                            NSString *attrs = [content substringWithRange:[m rangeAtIndex:1]];
+                            NSRegularExpression *nameRe = [NSRegularExpression regularExpressionWithPattern:@"\\bname=\"([^\"]+)\"" options:0 error:nil];
+                            NSTextCheckingResult *nameM = [nameRe firstMatchInString:attrs options:0 range:NSMakeRange(0, attrs.length)];
+                            NSRegularExpression *varRe = [NSRegularExpression regularExpressionWithPattern:@"\\bvariant=\"([0-9]+)\"" options:0 error:nil];
+                            NSTextCheckingResult *varM = [varRe firstMatchInString:attrs options:0 range:NSMakeRange(0, attrs.length)];
+                            NSRegularExpression *idRe = [NSRegularExpression regularExpressionWithPattern:@"\\bid=\"([0-9]+)\"" options:0 error:nil];
+                            NSTextCheckingResult *idM = [idRe firstMatchInString:attrs options:0 range:NSMakeRange(0, attrs.length)];
+
+                            if (nameM && varM) {
+                                NSString *eName = [attrs substringWithRange:[nameM rangeAtIndex:1]];
+                                int varVal = [[attrs substringWithRange:[varM rangeAtIndex:1]] intValue];
+                                std::string lowerEName = [eName.lowercaseString UTF8String];
+                                g_entityVariantMap[lowerEName] = varVal;
+                                if (idM) {
+                                    int idVal = [[attrs substringWithRange:[idM rangeAtIndex:1]] intValue];
+                                    g_entityTypeMap[lowerEName] = idVal;
+                                }
+                                RepogonLog(@"[XMLMerger] Registered Custom Entity (in-memory): %@ -> variant %d", eName, varVal);
+                            }
+                        }
+                    }
+                }
+                break;
+            }
+        }
+    }
+
+    // Only merge dynamically expandable XMLs (music and sounds)
     struct XMLTarget {
         const char *fileName;
         const char *rootTag;
     };
 
     XMLTarget targets[] = {
-        {"players.xml", "players"},
-        {"items.xml", "items"},
-        {"entities2.xml", "entities"},
-        {"costumes2.xml", "costumes"},
         {"music.xml", "music"},
         {"sounds.xml", "sounds"}
     };
-
-    int customPlayerId = 41;
-    int customSoundId = 1001;
-    int customMusicId = 101;
 
     for (const auto &target : targets) {
         NSString *targetFile = [NSString stringWithUTF8String:target.fileName];
@@ -229,47 +304,8 @@ void RepogonXMLMergerProcessMods(const std::vector<std::string> &modDirs) {
             continue; // No mods modified this XML
         }
 
-        // Parse custom IDs and types from injected XML
-        if ([targetFile isEqualToString:@"players.xml"]) {
-            NSRegularExpression *playerRegex = [NSRegularExpression regularExpressionWithPattern:@"<player\\b[^>]*\\bname=\"([^\"]+)\"" options:NSRegularExpressionCaseInsensitive error:nil];
-            NSArray *matches = [playerRegex matchesInString:injectedXml options:0 range:NSMakeRange(0, injectedXml.length)];
-            for (NSTextCheckingResult *match in matches) {
-                if (match.numberOfRanges > 1) {
-                    NSString *pName = [injectedXml substringWithRange:[match rangeAtIndex:1]];
-                    std::string lowerName = [pName.lowercaseString UTF8String];
-                    if (g_playerTypeMap.find(lowerName) == g_playerTypeMap.end()) {
-                        g_playerTypeMap[lowerName] = customPlayerId++;
-                        RepogonLog(@"[XMLMerger] Registered Custom PlayerType: %@ -> %d", pName, g_playerTypeMap[lowerName]);
-                    }
-                }
-            }
-        } else if ([targetFile isEqualToString:@"entities2.xml"]) {
-            NSRegularExpression *entRegex = [NSRegularExpression regularExpressionWithPattern:@"<entity\\b([^>]+)>" options:NSRegularExpressionCaseInsensitive error:nil];
-            NSArray *entMatches = [entRegex matchesInString:injectedXml options:0 range:NSMakeRange(0, injectedXml.length)];
-            for (NSTextCheckingResult *m in entMatches) {
-                if (m.numberOfRanges > 1) {
-                    NSString *attrs = [injectedXml substringWithRange:[m rangeAtIndex:1]];
-                    NSRegularExpression *nameRe = [NSRegularExpression regularExpressionWithPattern:@"\\bname=\"([^\"]+)\"" options:0 error:nil];
-                    NSTextCheckingResult *nameM = [nameRe firstMatchInString:attrs options:0 range:NSMakeRange(0, attrs.length)];
-                    NSRegularExpression *varRe = [NSRegularExpression regularExpressionWithPattern:@"\\bvariant=\"([0-9]+)\"" options:0 error:nil];
-                    NSTextCheckingResult *varM = [varRe firstMatchInString:attrs options:0 range:NSMakeRange(0, attrs.length)];
-                    NSRegularExpression *idRe = [NSRegularExpression regularExpressionWithPattern:@"\\bid=\"([0-9]+)\"" options:0 error:nil];
-                    NSTextCheckingResult *idM = [idRe firstMatchInString:attrs options:0 range:NSMakeRange(0, attrs.length)];
-
-                    if (nameM && varM) {
-                        NSString *eName = [attrs substringWithRange:[nameM rangeAtIndex:1]];
-                        int varVal = [[attrs substringWithRange:[varM rangeAtIndex:1]] intValue];
-                        std::string lowerEName = [eName.lowercaseString UTF8String];
-                        g_entityVariantMap[lowerEName] = varVal;
-                        if (idM) {
-                            int idVal = [[attrs substringWithRange:[idM rangeAtIndex:1]] intValue];
-                            g_entityTypeMap[lowerEName] = idVal;
-                        }
-                        RepogonLog(@"[XMLMerger] Registered Custom Entity: %@ -> variant %d", eName, varVal);
-                    }
-                }
-            }
-        } else if ([targetFile isEqualToString:@"sounds.xml"]) {
+        // Register custom sound IDs
+        if ([targetFile isEqualToString:@"sounds.xml"]) {
             NSRegularExpression *sndRegex = [NSRegularExpression regularExpressionWithPattern:@"<sound\\b[^>]*\\bname=\"([^\"]+)\"" options:NSRegularExpressionCaseInsensitive error:nil];
             NSArray *sndMatches = [sndRegex matchesInString:injectedXml options:0 range:NSMakeRange(0, injectedXml.length)];
             for (NSTextCheckingResult *m in sndMatches) {
