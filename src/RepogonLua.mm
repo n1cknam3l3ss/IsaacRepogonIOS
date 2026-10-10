@@ -34,9 +34,31 @@ static int LuaInclude(lua_State *L) {
 
 struct CallbackEntry {
     std::string modName;
+    int modRef; // Reference to mod table in LUA_REGISTRYINDEX (self)
     int funcRef;
     int param; // Optional entity type, item ID, or -1
 };
+
+static int GetCallbackId(lua_State *L, int index) {
+    if (lua_type(L, index) == LUA_TNUMBER) {
+        return static_cast<int>(lua_tointeger(L, index));
+    } else if (lua_type(L, index) == LUA_TSTRING) {
+        const char *str = lua_tostring(L, index);
+        lua_getglobal(L, "ModCallbacks");
+        if (lua_istable(L, -1)) {
+            lua_getfield(L, -1, str);
+            if (lua_isnumber(L, -1)) {
+                int id = static_cast<int>(lua_tointeger(L, -1));
+                lua_pop(L, 2);
+                return id;
+            }
+            lua_pop(L, 1);
+        }
+        lua_pop(L, 1);
+        return static_cast<int>(std::hash<std::string>{}(str));
+    }
+    return 0;
+}
 
 static std::unordered_map<int, std::vector<CallbackEntry>> g_callbacks;
 static std::unordered_map<uintptr_t, int> g_entityDataRefs;
@@ -87,6 +109,10 @@ void PushVector(lua_State *L, float x, float y) {
     lua_setfield(L, -2, "X");
     lua_pushnumber(L, y);
     lua_setfield(L, -2, "Y");
+    lua_pushnumber(L, x);
+    lua_setfield(L, -2, "x");
+    lua_pushnumber(L, y);
+    lua_setfield(L, -2, "y");
     luaL_getmetatable(L, "IsaacVector");
     lua_setmetatable(L, -2);
 }
@@ -95,10 +121,23 @@ Vector2f CheckVector(lua_State *L, int index) {
     Vector2f v = {0.0f, 0.0f};
     if (lua_istable(L, index)) {
         lua_getfield(L, index, "X");
-        if (lua_isnumber(L, -1)) v.x = static_cast<float>(lua_tonumber(L, -1));
+        if (lua_isnumber(L, -1)) {
+            v.x = static_cast<float>(lua_tonumber(L, -1));
+        } else {
+            lua_pop(L, 1);
+            lua_getfield(L, index, "x");
+            if (lua_isnumber(L, -1)) v.x = static_cast<float>(lua_tonumber(L, -1));
+        }
         lua_pop(L, 1);
+
         lua_getfield(L, index, "Y");
-        if (lua_isnumber(L, -1)) v.y = static_cast<float>(lua_tonumber(L, -1));
+        if (lua_isnumber(L, -1)) {
+            v.y = static_cast<float>(lua_tonumber(L, -1));
+        } else {
+            lua_pop(L, 1);
+            lua_getfield(L, index, "y");
+            if (lua_isnumber(L, -1)) v.y = static_cast<float>(lua_tonumber(L, -1));
+        }
         lua_pop(L, 1);
     }
     return v;
@@ -226,18 +265,24 @@ static int KColor_new(lua_State *L) {
 static int Font_new(lua_State *L) {
     lua_newtable(L);
     // Method stubs
-    lua_pushcfunction(L, [](lua_State *st) -> int { return 0; });
+    lua_pushcfunction(L, [](lua_State *st) -> int { lua_pushboolean(st, 1); return 1; });
     lua_setfield(L, -2, "Load");
-    lua_pushcfunction(L, [](lua_State *st) -> int {
-        // DrawString(text, x, y, kcolor, boxWidth, center)
+    lua_pushcfunction(L, [](lua_State *st) -> int { lua_pushboolean(st, 1); return 1; });
+    lua_setfield(L, -2, "IsLoaded");
+    lua_pushcfunction(L, [](lua_State *st) -> int { lua_pushnumber(st, 12.0); return 1; });
+    lua_setfield(L, -2, "GetLineHeight");
+
+    auto drawStr = [](lua_State *st) -> int {
         const char *txt = luaL_optstring(st, 2, "");
         float x = static_cast<float>(luaL_optnumber(st, 3, 0));
         float y = static_cast<float>(luaL_optnumber(st, 4, 0));
         RepogonOverlayAddText([NSString stringWithUTF8String:txt], x, y, 1.0f, 1.0f, 1.0f, 1.0f);
         return 0;
-    });
-    lua_setfield(L, -2, "DrawString");
-    lua_pushcfunction(L, [](lua_State *st) -> int {
+    };
+    lua_pushcfunction(L, drawStr); lua_setfield(L, -2, "DrawString");
+    lua_pushcfunction(L, drawStr); lua_setfield(L, -2, "DrawStringUTF8");
+
+    auto drawScaled = [](lua_State *st) -> int {
         const char *txt = luaL_optstring(st, 2, "");
         float sx = static_cast<float>(luaL_optnumber(st, 5, 1.0));
         float sy = static_cast<float>(luaL_optnumber(st, 6, 1.0));
@@ -245,23 +290,30 @@ static int Font_new(lua_State *L) {
         float y = static_cast<float>(luaL_optnumber(st, 4, 0));
         RepogonOverlayAddScaledText([NSString stringWithUTF8String:txt], x, y, sx, sy, 1.0f, 1.0f, 1.0f, 1.0f);
         return 0;
-    });
-    lua_setfield(L, -2, "DrawStringScaled");
-    lua_pushcfunction(L, [](lua_State *st) -> int {
+    };
+    lua_pushcfunction(L, drawScaled); lua_setfield(L, -2, "DrawStringScaled");
+    lua_pushcfunction(L, drawScaled); lua_setfield(L, -2, "DrawStringScaledUTF8");
+
+    auto getWidth = [](lua_State *st) -> int {
         const char *txt = luaL_optstring(st, 2, "");
         lua_pushnumber(st, strlen(txt) * 6.0f);
         return 1;
-    });
-    lua_setfield(L, -2, "GetStringWidth");
+    };
+    lua_pushcfunction(L, getWidth); lua_setfield(L, -2, "GetStringWidth");
+    lua_pushcfunction(L, getWidth); lua_setfield(L, -2, "GetStringWidthUTF8");
     return 1;
 }
 
 static int Sprite_new(lua_State *L) {
     lua_newtable(L);
+    PushVector(L, 1.0f, 1.0f);
+    lua_setfield(L, -2, "Scale");
+
     auto dummyFunc = [](lua_State *st) -> int { return 0; };
     lua_pushcfunction(L, dummyFunc); lua_setfield(L, -2, "Load");
     lua_pushcfunction(L, dummyFunc); lua_setfield(L, -2, "Play");
     lua_pushcfunction(L, dummyFunc); lua_setfield(L, -2, "SetFrame");
+    lua_pushcfunction(L, dummyFunc); lua_setfield(L, -2, "SetLastFrame");
     lua_pushcfunction(L, dummyFunc); lua_setfield(L, -2, "SetAnimation");
     lua_pushcfunction(L, dummyFunc); lua_setfield(L, -2, "Update");
     lua_pushcfunction(L, dummyFunc); lua_setfield(L, -2, "Render");
@@ -273,6 +325,7 @@ static int Sprite_new(lua_State *L) {
     lua_pushcfunction(L, [](lua_State *st) -> int { lua_pushboolean(st, 1); return 1; }); lua_setfield(L, -2, "IsPlaying");
     lua_pushcfunction(L, [](lua_State *st) -> int { lua_pushstring(st, ""); return 1; }); lua_setfield(L, -2, "GetAnimation");
     lua_pushcfunction(L, [](lua_State *st) -> int { lua_pushinteger(st, 0); return 1; }); lua_setfield(L, -2, "GetFrame");
+    lua_pushcfunction(L, [](lua_State *st) -> int { lua_pushstring(st, ""); return 1; }); lua_setfield(L, -2, "GetFilename");
     lua_pushcfunction(L, dummyFunc); lua_setfield(L, -2, "Colorize");
     return 1;
 }
@@ -384,6 +437,94 @@ static int Entity_Remove(lua_State *L) {
     uintptr_t ent = CheckEntityPtr(L, 1);
     if (ent) RepogonEntityKill(ent);
     return 0;
+}
+
+static int Entity_Exists(lua_State *L) {
+    uintptr_t ent = CheckEntityPtr(L, 1);
+    lua_pushboolean(L, ent != 0);
+    return 1;
+}
+
+static int Entity_IsDead(lua_State *L) {
+    lua_pushboolean(L, 0);
+    return 1;
+}
+
+static int Entity_IsActive(lua_State *L) {
+    lua_pushboolean(L, 1);
+    return 1;
+}
+
+static int Entity_HasEntityFlags(lua_State *L) {
+    lua_pushboolean(L, 0);
+    return 1;
+}
+
+static int Entity_AddEntityFlags(lua_State *L) {
+    return 0;
+}
+
+static int Entity_ClearEntityFlags(lua_State *L) {
+    return 0;
+}
+
+static int Entity_GetSprite(lua_State *L) {
+    return Sprite_new(L);
+}
+
+static int Entity_GetColor(lua_State *L) {
+    return KColor_new(L);
+}
+
+static int Entity_SetColor(lua_State *L) {
+    return 0;
+}
+
+static int Entity_GetDropRNG(lua_State *L) {
+    lua_newtable(L);
+    lua_pushcfunction(L, [](lua_State *st) -> int { return 0; }); lua_setfield(L, -2, "SetSeed");
+    lua_pushcfunction(L, [](lua_State *st) -> int { lua_pushinteger(st, rand()); return 1; }); lua_setfield(L, -2, "Next");
+    lua_pushcfunction(L, [](lua_State *st) -> int {
+        int max = static_cast<int>(luaL_optinteger(st, 2, 100));
+        lua_pushinteger(st, max > 0 ? (rand() % max) : 0);
+        return 1;
+    }); lua_setfield(L, -2, "RandomInt");
+    return 1;
+}
+
+static int Entity_ToFamiliar(lua_State *L) {
+    lua_pushnil(L);
+    return 1;
+}
+
+static int Entity_ToNPC(lua_State *L) {
+    lua_pushnil(L);
+    return 1;
+}
+
+static int Entity_ToBomb(lua_State *L) {
+    lua_pushnil(L);
+    return 1;
+}
+
+static int Entity_ToPickup(lua_State *L) {
+    lua_pushnil(L);
+    return 1;
+}
+
+static int Entity_ToTear(lua_State *L) {
+    lua_pushnil(L);
+    return 1;
+}
+
+static int Entity_ToLaser(lua_State *L) {
+    lua_pushnil(L);
+    return 1;
+}
+
+static int Entity_ToKnife(lua_State *L) {
+    lua_pushnil(L);
+    return 1;
 }
 
 void PushEntity(lua_State *L, uintptr_t ent) {
@@ -558,9 +699,63 @@ static int Player_GetName(lua_State *L) {
 }
 
 static int Player_HasCollectible(lua_State *L) {
-    lua_pushboolean(L, 0); // Extended items query
+    lua_pushboolean(L, 0);
     return 1;
 }
+
+static int PushDummyRNG(lua_State *L) {
+    lua_newtable(L);
+    lua_pushcfunction(L, [](lua_State *st) -> int { return 0; }); lua_setfield(L, -2, "SetSeed");
+    lua_pushcfunction(L, [](lua_State *st) -> int { lua_pushinteger(st, rand()); return 1; }); lua_setfield(L, -2, "Next");
+    lua_pushcfunction(L, [](lua_State *st) -> int {
+        int max = static_cast<int>(luaL_optinteger(st, 2, 100));
+        lua_pushinteger(st, max > 0 ? (rand() % max) : 0);
+        return 1;
+    }); lua_setfield(L, -2, "RandomInt");
+    lua_pushcfunction(L, [](lua_State *st) -> int { lua_pushnumber(st, static_cast<double>(rand()) / RAND_MAX); return 1; }); lua_setfield(L, -2, "RandomFloat");
+    return 1;
+}
+
+static int Player_GetEffects(lua_State *L) {
+    lua_newtable(L);
+    lua_pushcfunction(L, [](lua_State *st) -> int { lua_pushboolean(st, 0); return 1; }); lua_setfield(L, -2, "HasCollectibleEffect");
+    lua_pushcfunction(L, [](lua_State *st) -> int { lua_pushboolean(st, 0); return 1; }); lua_setfield(L, -2, "HasTrinketEffect");
+    lua_pushcfunction(L, [](lua_State *st) -> int { lua_pushboolean(st, 0); return 1; }); lua_setfield(L, -2, "HasNullEffect");
+    lua_pushcfunction(L, [](lua_State *st) -> int { return 0; }); lua_setfield(L, -2, "AddCollectibleEffect");
+    lua_pushcfunction(L, [](lua_State *st) -> int { return 0; }); lua_setfield(L, -2, "RemoveCollectibleEffect");
+    return 1;
+}
+
+static int Player_GetTrinketMultiplier(lua_State *L) { lua_pushinteger(L, 1); return 1; }
+static int Player_GetCollectibleNum(lua_State *L) {
+    lua_pushinteger(L, 0);
+    return 1;
+}
+static int Player_GetSmeltedTrinkets(lua_State *L) { lua_newtable(L); return 1; }
+static int Player_GetTrinket(lua_State *L) { lua_pushinteger(L, 0); return 1; }
+static int Player_GetCard(lua_State *L) { lua_pushinteger(L, 0); return 1; }
+static int Player_GetPill(lua_State *L) { lua_pushinteger(L, 0); return 1; }
+static int Player_GetEffectiveMaxHearts(lua_State *L) { lua_pushinteger(L, 6); return 1; }
+static int Player_GetBrokenHearts(lua_State *L) { lua_pushinteger(L, 0); return 1; }
+static int Player_GetSoulCharge(lua_State *L) { lua_pushinteger(L, 0); return 1; }
+static int Player_GetBloodCharge(lua_State *L) { lua_pushinteger(L, 0); return 1; }
+static int Player_GetPoopMana(lua_State *L) { lua_pushinteger(L, 0); return 1; }
+static int Player_GetPoopSpell(lua_State *L) { lua_pushinteger(L, 0); return 1; }
+static int Player_GetPlayerFormCounter(lua_State *L) { lua_pushinteger(L, 0); return 1; }
+static int Player_HasPlayerForm(lua_State *L) { lua_pushboolean(L, 0); return 1; }
+static int Player_HasGoldenBomb(lua_State *L) { lua_pushboolean(L, 0); return 1; }
+static int Player_HasTrinket(lua_State *L) { lua_pushboolean(L, 0); return 1; }
+static int Player_IsSubPlayer(lua_State *L) { lua_pushboolean(L, 0); return 1; }
+static int Player_CanPickRedHearts(lua_State *L) { lua_pushboolean(L, 1); return 1; }
+static int Player_GetBabySkin(lua_State *L) { lua_pushinteger(L, 0); return 1; }
+static int Player_GetMainTwin(lua_State *L) { lua_pushvalue(L, 1); return 1; }
+static int Player_GetOtherTwin(lua_State *L) { lua_pushnil(L); return 1; }
+static int Player_AddCollectible(lua_State *L) { return 0; }
+static int Player_RemoveCollectible(lua_State *L) { return 0; }
+static int Player_GetZodiacEffect(lua_State *L) { lua_pushinteger(L, 0); return 1; }
+static int Player_GetModelingClayEffect(lua_State *L) { lua_pushinteger(L, 0); return 1; }
+static int Player_GetGlyphOfBalanceDrop(lua_State *L) { lua_pushinteger(L, 0); return 1; }
+static int Player_isMainPlayer(lua_State *L) { lua_pushboolean(L, 1); return 1; }
 
 void PushPlayer(lua_State *L, uintptr_t player) {
     lua_newtable(L);
@@ -593,6 +788,34 @@ static int Room_IsClear(lua_State *L) {
     lua_pushboolean(L, RepogonRoomIsClear());
     return 1;
 }
+
+static int Room_IsFirstVisit(lua_State *L) { lua_pushboolean(L, 0); return 1; }
+static int Room_TriggerClear(lua_State *L) { return 0; }
+static int Room_GetSpawnSeed(lua_State *L) { lua_pushinteger(L, 1); return 1; }
+static int Room_GetDecorationSeed(lua_State *L) { lua_pushinteger(L, 1); return 1; }
+static int Room_IsPositionInRoom(lua_State *L) { lua_pushboolean(L, 1); return 1; }
+static int Room_Update(lua_State *L) { return 0; }
+static int Room_MamaMegaExplosion(lua_State *L) { return 0; }
+static int Room_GetRenderMode(lua_State *L) { lua_pushinteger(L, 0); return 1; }
+static int Room_RemoveGridEntity(lua_State *L) { return 0; }
+static int Room_GetGridPosition(lua_State *L) { PushVector(L, 320.0f, 240.0f); return 1; }
+static int Room_HasWater(lua_State *L) { lua_pushboolean(L, 0); return 1; }
+static int Room_HasLava(lua_State *L) { lua_pushboolean(L, 0); return 1; }
+static int Room_GetFrameCount(lua_State *L) { lua_pushinteger(L, 0); return 1; }
+static int Room_GetRandomPosition(lua_State *L) { PushVector(L, 320.0f, 240.0f); return 1; }
+static int Room_IsMirrorWorld(lua_State *L) { lua_pushboolean(L, 0); return 1; }
+static int Room_GetDoor(lua_State *L) { lua_pushnil(L); return 1; }
+static int Room_RemoveDoor(lua_State *L) { return 0; }
+static int Room_FindFreeTilePosition(lua_State *L) { PushVector(L, 320.0f, 240.0f); return 1; }
+static int Room_GetGridWidth(lua_State *L) { lua_pushinteger(L, 13); return 1; }
+static int Room_GetGridHeight(lua_State *L) { lua_pushinteger(L, 7); return 1; }
+static int Room_SetFloorColor(lua_State *L) { return 0; }
+static int Room_SetWallColor(lua_State *L) { return 0; }
+static int Room_GetBackdropType(lua_State *L) { lua_pushinteger(L, 1); return 1; }
+static int Room_GetGridEntity(lua_State *L) { lua_pushnil(L); return 1; }
+static int Room_GetRenderScrollOffset(lua_State *L) { PushVector(L, 0.0f, 0.0f); return 1; }
+static int Room_IsCurrentRoomLastBoss(lua_State *L) { lua_pushboolean(L, 0); return 1; }
+static int Room_GetRoomConfigStage(lua_State *L) { lua_pushinteger(L, 1); return 1; }
 
 void PushRoom(lua_State *L, uintptr_t room) {
     lua_newtable(L);
@@ -636,12 +859,96 @@ static int Game_GetNumPlayers(lua_State *L) {
     return 1;
 }
 
+static int Game_GetHUD(lua_State *L) {
+    lua_newtable(L);
+    lua_pushcfunction(L, [](lua_State *st) -> int { lua_pushboolean(st, 1); return 1; }); lua_setfield(L, -2, "IsVisible");
+    lua_pushcfunction(L, [](lua_State *st) -> int { return 0; }); lua_setfield(L, -2, "SetVisible");
+    lua_pushcfunction(L, [](lua_State *st) -> int { return 0; }); lua_setfield(L, -2, "ShowItemText");
+    return 1;
+}
+
+static int Game_GetSeeds(lua_State *L) {
+    lua_newtable(L);
+    lua_pushcfunction(L, [](lua_State *st) -> int { lua_pushboolean(st, 0); return 1; }); lua_setfield(L, -2, "HasSeedEffect");
+    lua_pushcfunction(L, [](lua_State *st) -> int { lua_pushboolean(st, 0); return 1; }); lua_setfield(L, -2, "IsCustomRun");
+    lua_pushcfunction(L, [](lua_State *st) -> int { lua_pushinteger(st, 1); return 1; }); lua_setfield(L, -2, "GetStartSeed");
+    lua_pushcfunction(L, [](lua_State *st) -> int { lua_pushinteger(st, 0); return 1; }); lua_setfield(L, -2, "CountSeedEffects");
+    lua_pushcfunction(L, [](lua_State *st) -> int { return 0; }); lua_setfield(L, -2, "SetStartSeed");
+    lua_pushcfunction(L, [](lua_State *st) -> int { lua_pushstring(st, "DUMMY"); return 1; }); lua_setfield(L, -2, "GetStartSeedString");
+    return 1;
+}
+
+static int Game_GetItemPool(lua_State *L) {
+    lua_newtable(L);
+    lua_pushcfunction(L, [](lua_State *st) -> int { lua_pushinteger(st, 1); return 1; }); lua_setfield(L, -2, "GetCollectible");
+    return 1;
+}
+
+static int Game_IsGreedMode(lua_State *L) {
+    lua_pushboolean(L, 0);
+    return 1;
+}
+
+static int Game_GetStateFlag(lua_State *L) {
+    lua_pushboolean(L, 0);
+    return 1;
+}
+
+static int Game_IsPaused(lua_State *L) {
+    lua_pushboolean(L, 0);
+    return 1;
+}
+
+static int Game_GetVictoryLap(lua_State *L) {
+    lua_pushinteger(L, 0);
+    return 1;
+}
+
+static int Game_index(lua_State *L) {
+    const char *key = luaL_checkstring(L, 2);
+    luaL_getmetatable(L, "IsaacGame");
+    lua_pushvalue(L, 2);
+    lua_rawget(L, -2);
+    if (!lua_isnil(L, -1)) return 1;
+    lua_pop(L, 2);
+
+    if (strcmp(key, "ScreenShakeOffset") == 0) {
+        PushVector(L, 0.0f, 0.0f);
+        return 1;
+    }
+    if (strcmp(key, "TimeCounter") == 0) {
+        lua_pushinteger(L, RepogonGameGetFrameCount());
+        return 1;
+    }
+    if (strcmp(key, "Difficulty") == 0) {
+        lua_pushinteger(L, 0);
+        return 1;
+    }
+    return 0;
+}
+
 void PushGame(lua_State *L, uintptr_t game) {
     lua_newtable(L);
     lua_pushinteger(L, static_cast<lua_Integer>(game));
     lua_setfield(L, -2, "__ptr");
     luaL_getmetatable(L, "IsaacGame");
     lua_setmetatable(L, -2);
+}
+
+static void PushRoomDesc(lua_State *L) {
+    lua_newtable(L);
+    lua_pushinteger(L, 0); lua_setfield(L, -2, "SafeGridIndex");
+    lua_pushinteger(L, 0); lua_setfield(L, -2, "GridIndex");
+    lua_pushinteger(L, 1); lua_setfield(L, -2, "VisitedCount");
+    lua_pushinteger(L, 0); lua_setfield(L, -2, "Flags");
+    lua_pushboolean(L, 1); lua_setfield(L, -2, "Clear");
+
+    lua_newtable(L);
+    lua_pushinteger(L, 1); lua_setfield(L, -2, "Type");
+    lua_pushinteger(L, 1); lua_setfield(L, -2, "Shape");
+    lua_pushinteger(L, 0); lua_setfield(L, -2, "Subtype");
+    lua_pushstring(L, "Room"); lua_setfield(L, -2, "Name");
+    lua_setfield(L, -2, "Data");
 }
 
 static int Level_GetStage(lua_State *L) {
@@ -668,6 +975,65 @@ static int Level_GetPlanetariumChance(lua_State *L) {
     lua_pushnumber(L, 0.01);
     return 1;
 }
+
+static int Level_GetCurrentRoomDesc(lua_State *L) {
+    PushRoomDesc(L);
+    return 1;
+}
+
+static int Level_GetLastRoomDesc(lua_State *L) {
+    PushRoomDesc(L);
+    return 1;
+}
+
+static int Level_GetRoomByIdx(lua_State *L) {
+    PushRoomDesc(L);
+    return 1;
+}
+
+static int Level_GetRooms(lua_State *L) {
+    lua_newtable(L);
+    lua_pushinteger(L, 1); lua_setfield(L, -2, "Size");
+    lua_pushcfunction(L, [](lua_State *st) -> int {
+        PushRoomDesc(st);
+        return 1;
+    });
+    lua_setfield(L, -2, "Get");
+
+    PushRoomDesc(L);
+    lua_pushvalue(L, -1);
+    lua_rawseti(L, -3, 0);
+    lua_rawseti(L, -2, 1);
+    return 1;
+}
+
+static int Level_GetCurrentRoom(lua_State *L) {
+    PushRoom(L, RepogonGetRoom());
+    return 1;
+}
+
+static int Level_GetStartingRoomIndex(lua_State *L) {
+    lua_pushinteger(L, 0);
+    return 1;
+}
+
+static int Level_GetAbsoluteStage(lua_State *L) {
+    lua_pushinteger(L, RepogonGameGetStage());
+    return 1;
+}
+
+static int Level_IsAscent(lua_State *L) {
+    lua_pushboolean(L, 0);
+    return 1;
+}
+
+static int Level_IsPreAscent(lua_State *L) {
+    lua_pushboolean(L, 0);
+    return 1;
+}
+
+static int Level_UncoverHiddenDoor(lua_State *L) { return 0; }
+static int Level_MakeRedRoomDoor(lua_State *L) { return 0; }
 
 void PushLevel(lua_State *L) {
     lua_newtable(L);
@@ -838,6 +1204,188 @@ static int Isaac_GetItemConfig(lua_State *L) {
     return 1;
 }
 
+static int Isaac_ConsoleOutput(lua_State *L) {
+    const char *msg = luaL_optstring(L, 1, "");
+    RepogonLogRaw(msg);
+    return 0;
+}
+
+static int Isaac_GetSoundIdByName(lua_State *L) {
+    const char *name = luaL_optstring(L, 1, "");
+    int id = static_cast<int>(std::hash<std::string>{}(name) & 0x7FFF);
+    lua_pushinteger(L, id > 0 ? id : 1);
+    return 1;
+}
+
+static int Isaac_GetMusicIdByName(lua_State *L) {
+    const char *name = luaL_optstring(L, 1, "");
+    int id = static_cast<int>(std::hash<std::string>{}(name) & 0x7FFF);
+    lua_pushinteger(L, id > 0 ? id : 1);
+    return 1;
+}
+
+static int Isaac_GetEntityVariantByName(lua_State *L) {
+    const char *name = luaL_optstring(L, 1, "");
+    int id = static_cast<int>(std::hash<std::string>{}(name) & 0x7FFF);
+    lua_pushinteger(L, id > 0 ? id : 1);
+    return 1;
+}
+
+static int Isaac_GetEntityTypeByName(lua_State *L) {
+    const char *name = luaL_optstring(L, 1, "");
+    int id = static_cast<int>(std::hash<std::string>{}(name) & 0x7FFF);
+    lua_pushinteger(L, id > 0 ? id : 1);
+    return 1;
+}
+
+static int Isaac_GetPlayerTypeByName(lua_State *L) {
+    const char *name = luaL_optstring(L, 1, "");
+    int id = static_cast<int>((std::hash<std::string>{}(name) % 100) + 50);
+    lua_pushinteger(L, id);
+    return 1;
+}
+
+static int Isaac_GetCostumeIdByName(lua_State *L) {
+    const char *name = luaL_optstring(L, 1, "");
+    int id = static_cast<int>(std::hash<std::string>{}(name) & 0x7FFF);
+    lua_pushinteger(L, id > 0 ? id : 1);
+    return 1;
+}
+
+static int Isaac_GetTime(lua_State *L) {
+    uint32_t ms = static_cast<uint32_t>([[NSDate date] timeIntervalSince1970] * 1000.0);
+    lua_pushinteger(L, ms);
+    return 1;
+}
+
+static int Isaac_IsInGame(lua_State *L) {
+    lua_pushboolean(L, 1);
+    return 1;
+}
+
+static int Isaac_GetFrameCount(lua_State *L) {
+    lua_pushinteger(L, RepogonGameGetFrameCount());
+    return 1;
+}
+
+static int Isaac_CountBosses(lua_State *L) {
+    lua_pushinteger(L, 0);
+    return 1;
+}
+
+static int Isaac_CountEnemies(lua_State *L) {
+    lua_pushinteger(L, 0);
+    return 1;
+}
+
+static int Isaac_GetRoomEntities(lua_State *L) {
+    lua_newtable(L);
+    uintptr_t p = RepogonGetPlayer(0);
+    if (p) {
+        PushPlayer(L, p);
+        lua_rawseti(L, -2, 1);
+    }
+    return 1;
+}
+
+static int Isaac_FindInRadius(lua_State *L) {
+    lua_newtable(L);
+    return 1;
+}
+
+static int Isaac_GetChallenge(lua_State *L) {
+    lua_pushinteger(L, 0);
+    return 1;
+}
+
+static int Isaac_WorldToRenderPosition(lua_State *L) {
+    Vector2f v = CheckVector(L, 1);
+    PushVector(L, v.x, v.y);
+    return 1;
+}
+
+static int Isaac_ScreenToWorldDistance(lua_State *L) {
+    Vector2f v = CheckVector(L, 1);
+    PushVector(L, v.x, v.y);
+    return 1;
+}
+
+static int Isaac_Explode(lua_State *L) {
+    return 0;
+}
+
+static int Isaac_GridSpawn(lua_State *L) {
+    lua_pushnil(L);
+    return 1;
+}
+
+static int Isaac_ExecuteCommand(lua_State *L) {
+    const char *cmd = luaL_optstring(L, 1, "");
+    RepogonLog(@"Isaac.ExecuteCommand: %s", cmd);
+    lua_pushstring(L, "");
+    return 1;
+}
+
+static int Isaac_GetPersistentGameData(lua_State *L) {
+    lua_newtable(L);
+    lua_pushcfunction(L, [](lua_State *st) -> int { lua_pushboolean(st, 1); return 1; }); lua_setfield(L, -2, "Unlocked");
+    lua_pushcfunction(L, [](lua_State *st) -> int { lua_pushboolean(st, 1); return 1; }); lua_setfield(L, -2, "IsItemInCollection");
+    lua_pushcfunction(L, [](lua_State *st) -> int { lua_pushinteger(st, 1); return 1; }); lua_setfield(L, -2, "GetBestiaryEncounterCount");
+    lua_pushcfunction(L, [](lua_State *st) -> int { lua_pushinteger(st, 999); return 1; }); lua_setfield(L, -2, "GetEventCounter");
+    return 1;
+}
+
+static int Isaac_RunCallback(lua_State *L) {
+    int callbackId = GetCallbackId(L, 1);
+    auto it = g_callbacks.find(callbackId);
+    if (it != g_callbacks.end()) {
+        int top = lua_gettop(L);
+        for (const auto &entry : it->second) {
+            lua_rawgeti(L, LUA_REGISTRYINDEX, entry.funcRef);
+            if (!lua_isfunction(L, -1)) {
+                lua_pop(L, 1);
+                continue;
+            }
+            lua_rawgeti(L, LUA_REGISTRYINDEX, entry.modRef);
+            for (int i = 2; i <= top; ++i) {
+                lua_pushvalue(L, i);
+            }
+            int err = lua_pcall(L, 1 + (top - 1), 1, 0);
+            if (err != 0) {
+                const char *errStr = lua_tostring(L, -1);
+                RepogonLog(@"RunCallback Error [%s] (id: %d): %s", entry.modName.c_str(), callbackId, errStr ? errStr : "unknown");
+                lua_pop(L, 1);
+            } else {
+                if (!lua_isnil(L, -1)) {
+                    return 1;
+                }
+                lua_pop(L, 1);
+            }
+        }
+    }
+    return 0;
+}
+
+static int Isaac_GetCallbacks(lua_State *L) {
+    int callbackId = GetCallbackId(L, 1);
+    lua_newtable(L);
+    auto it = g_callbacks.find(callbackId);
+    if (it != g_callbacks.end()) {
+        int idx = 1;
+        for (const auto &entry : it->second) {
+            lua_newtable(L);
+            lua_rawgeti(L, LUA_REGISTRYINDEX, entry.funcRef);
+            lua_setfield(L, -2, "Function");
+            lua_rawgeti(L, LUA_REGISTRYINDEX, entry.modRef);
+            lua_setfield(L, -2, "Mod");
+            lua_pushinteger(L, entry.param);
+            lua_setfield(L, -2, "Param");
+            lua_rawseti(L, -2, idx++);
+        }
+    }
+    return 1;
+}
+
 #pragma mark - RegisterMod and Mod Callback Handling
 
 static int Mod_AddCallback(lua_State *L) {
@@ -846,15 +1394,23 @@ static int Mod_AddCallback(lua_State *L) {
     std::string modName = luaL_optstring(L, -1, "UnknownMod");
     lua_pop(L, 1);
 
-    int callbackId = static_cast<int>(luaL_checkinteger(L, 2));
-    luaL_checktype(L, 3, LUA_TFUNCTION);
+    int callbackId = GetCallbackId(L, 2);
+    if (!lua_isfunction(L, 3)) {
+        return luaL_error(L, "bad argument #2 to 'AddCallback' (function expected)");
+    }
     int param = static_cast<int>(luaL_optinteger(L, 4, -1));
 
+    // Save mod table reference (self)
+    lua_pushvalue(L, 1);
+    int modRef = luaL_ref(L, LUA_REGISTRYINDEX);
+
+    // Save callback function reference
     lua_pushvalue(L, 3);
     int funcRef = luaL_ref(L, LUA_REGISTRYINDEX);
 
     CallbackEntry entry;
     entry.modName = modName;
+    entry.modRef = modRef;
     entry.funcRef = funcRef;
     entry.param = param;
 
@@ -865,7 +1421,7 @@ static int Mod_AddCallback(lua_State *L) {
 
 static int Mod_RemoveCallback(lua_State *L) {
     // mod:RemoveCallback(callbackId, func)
-    int callbackId = static_cast<int>(luaL_checkinteger(L, 2));
+    int callbackId = GetCallbackId(L, 2);
     auto it = g_callbacks.find(callbackId);
     if (it != g_callbacks.end()) {
         for (auto eit = it->second.begin(); eit != it->second.end(); ++eit) {
@@ -874,6 +1430,7 @@ static int Mod_RemoveCallback(lua_State *L) {
             lua_pop(L, 1);
             if (same) {
                 luaL_unref(L, LUA_REGISTRYINDEX, eit->funcRef);
+                luaL_unref(L, LUA_REGISTRYINDEX, eit->modRef);
                 it->second.erase(eit);
                 break;
             }
@@ -930,6 +1487,18 @@ static int Mod_RemoveData(lua_State *L) {
     NSString *savePath = [paths.firstObject stringByAppendingPathComponent:[NSString stringWithFormat:@"%@_save.dat", modName]];
     [[NSFileManager defaultManager] removeItemAtPath:savePath error:nil];
     return 0;
+}
+
+static int Isaac_SaveModData(lua_State *L) {
+    return Mod_SaveData(L);
+}
+
+static int Isaac_LoadModData(lua_State *L) {
+    return Mod_LoadData(L);
+}
+
+static int Isaac_HasModData(lua_State *L) {
+    return Mod_HasData(L);
 }
 
 static int RegisterMod_fn(lua_State *L) {
@@ -1115,10 +1684,130 @@ SortingLayer = make_enum({})
 Dimension = make_enum({})
 SeedEffect = make_enum({})
 Challenge = make_enum({ CHALLENGE_NULL = 0 })
+ItemType = make_enum({
+    ITEM_NULL = 0,
+    ITEM_PASSIVE = 1,
+    ITEM_ACTIVE = 2,
+    ITEM_FAMILIAR = 3,
+    ITEM_TRINKET = 4
+})
+ActiveSlot = make_enum({
+    SLOT_PRIMARY = 0,
+    SLOT_SECONDARY = 1,
+    SLOT_POCKET = 2,
+    SLOT_POCKET2 = 3
+})
+SkinColor = make_enum({
+    SKIN_WHITE = 0,
+    SKIN_BLACK = 1,
+    SKIN_BLUE = 2,
+    SKIN_RED = 3,
+    SKIN_GREEN = 4,
+    SKIN_GREY = 5
+})
+
+Options = {
+    Language = "en",
+    FoundHUD = 1,
+    ExtraHUD = 1,
+    HUDOffset = 0,
+    MusicVolume = 1.0,
+    SFXVolume = 1.0,
+    Gamma = 1.0,
+    Brightness = 1.0,
+    Fullscreen = true,
+    Filter = false,
+    Vsync = true,
+    MaxScale = 99,
+    MaxRenderScale = 99,
+    PauseOnFocusLost = false,
+    StatHUDPlanetarium = true
+}
 
 ItemConfig = {
     GetItemConfig = function() return Isaac.GetItemConfig() end,
     Config = { GetItemConfig = function() return Isaac.GetItemConfig() end }
+}
+
+PlayerForm = make_enum({
+    PLAYERFORM_GUPPY = 0,
+    PLAYERFORM_LORD_OF_THE_FLIES = 1,
+    PLAYERFORM_MUSHROOM = 2,
+    PLAYERFORM_ANGEL = 3,
+    PLAYERFORM_BOB = 4,
+    PLAYERFORM_DRUID = 5,
+    PLAYERFORM_CTHULHU = 6,
+    PLAYERFORM_SPIDERBABY = 7,
+    PLAYERFORM_BOOKWORM = 8,
+    PLAYERFORM_ADULT = 9,
+    PLAYERFORM_MOM = 10,
+    PLAYERFORM_CONJOINED = 11,
+    PLAYERFORM_SUPERBUM = 12,
+    PLAYERFORM_STOMPY = 13,
+    PLAYERFORM_SERAPHIM = 14
+})
+
+Input = {
+    IsActionPressed = function(a, p) return false end,
+    IsActionTriggered = function(a, p) return false end,
+    IsButtonPressed = function(b, c) return false end,
+    IsButtonTriggered = function(b, c) return false end,
+    GetMousePosition = function(r) return { X = 0, Y = 0, x = 0, y = 0 } end
+}
+
+MusicManager = function()
+    local mgr = {}
+    function mgr:GetCurrentMusicID() return 1 end
+    function mgr:GetQueuedMusicID() return 0 end
+    function mgr:Play(id, vol) end
+    function mgr:Queue(id) end
+    function mgr:Pause() end
+    function mgr:Resume() end
+    function mgr:Fadeout(rate) end
+    function mgr:Crossfade(id) end
+    function mgr:PitchSlide(rate) end
+    function mgr:ResetPitch() end
+    function mgr:VolumeSlide(vol, rate) end
+    function mgr:UpdateVolume() end
+    function mgr:EnableLayer(layer) end
+    function mgr:DisableLayer(layer) end
+    function mgr:IsLayerEnabled(layer) return false end
+    function mgr:Enable() end
+    function mgr:Disable() end
+    function mgr:IsEnabled() return true end
+    return mgr
+end
+
+SFXManager = function()
+    local sfx = {}
+    function sfx:Play(id, vol, frameDelay, loop, pitch, pan) end
+    function sfx:Stop(id) end
+    function sfx:IsPlaying(id) return false end
+    function sfx:AdjustPitch(id, pitch) end
+    function sfx:AdjustVolume(id, vol) end
+    return sfx
+end
+
+local rng_mt = {
+    __index = {
+        SetSeed = function(self, s, shift) end,
+        Next = function(self) return math.random(0, 2147483647) end,
+        RandomInt = function(self, max) return max and math.random(0, max - 1) or math.random(0, 100) end,
+        RandomFloat = function(self) return math.random() end
+    }
+}
+RNG = function()
+    return setmetatable({}, rng_mt)
+end
+
+REPENTANCE_PLUS = true
+FontRenderSettings = function() return {} end
+XMLData = {
+    GetEntityByTypeVarSub = function(t, v, s) return nil end
+}
+MainMenuType = make_enum({ COLLECTION = 1 })
+MenuManager = {
+    GetActiveMenu = function() return -1 end
 }
 )RAW_INIT";
 
@@ -1145,6 +1834,27 @@ ItemConfig = {
     });
     lua_setglobal(g_L, "Game");
 
+    const char *kPostInitScript = R"RAW_POST(
+local orig_Vector = Vector
+Vector = setmetatable({
+    Zero = orig_Vector(0, 0),
+    One = orig_Vector(1, 1),
+    FromAngle = function(deg)
+        local rad = math.rad(deg)
+        return orig_Vector(math.cos(rad), math.sin(rad))
+    end
+}, {
+    __call = function(_, x, y) return orig_Vector(x, y) end
+})
+
+local orig_Game = Game
+local game_inst = orig_Game()
+Game = setmetatable(game_inst, {
+    __call = function(_) return game_inst end
+})
+)RAW_POST";
+    luaL_dostring(g_L, kPostInitScript);
+
     // Setup Metatables
     // 1. IsaacVector
     luaL_newmetatable(g_L, "IsaacVector");
@@ -1169,6 +1879,23 @@ ItemConfig = {
     lua_pushcfunction(g_L, Entity_newindex); lua_setfield(g_L, -2, "__newindex");
     lua_pushcfunction(g_L, Entity_GetData); lua_setfield(g_L, -2, "GetData");
     lua_pushcfunction(g_L, Entity_ToPlayer); lua_setfield(g_L, -2, "ToPlayer");
+    lua_pushcfunction(g_L, Entity_ToFamiliar); lua_setfield(g_L, -2, "ToFamiliar");
+    lua_pushcfunction(g_L, Entity_ToNPC); lua_setfield(g_L, -2, "ToNPC");
+    lua_pushcfunction(g_L, Entity_ToBomb); lua_setfield(g_L, -2, "ToBomb");
+    lua_pushcfunction(g_L, Entity_ToPickup); lua_setfield(g_L, -2, "ToPickup");
+    lua_pushcfunction(g_L, Entity_ToTear); lua_setfield(g_L, -2, "ToTear");
+    lua_pushcfunction(g_L, Entity_ToLaser); lua_setfield(g_L, -2, "ToLaser");
+    lua_pushcfunction(g_L, Entity_ToKnife); lua_setfield(g_L, -2, "ToKnife");
+    lua_pushcfunction(g_L, Entity_Exists); lua_setfield(g_L, -2, "Exists");
+    lua_pushcfunction(g_L, Entity_IsDead); lua_setfield(g_L, -2, "IsDead");
+    lua_pushcfunction(g_L, Entity_IsActive); lua_setfield(g_L, -2, "IsActive");
+    lua_pushcfunction(g_L, Entity_HasEntityFlags); lua_setfield(g_L, -2, "HasEntityFlags");
+    lua_pushcfunction(g_L, Entity_AddEntityFlags); lua_setfield(g_L, -2, "AddEntityFlags");
+    lua_pushcfunction(g_L, Entity_ClearEntityFlags); lua_setfield(g_L, -2, "ClearEntityFlags");
+    lua_pushcfunction(g_L, Entity_GetSprite); lua_setfield(g_L, -2, "GetSprite");
+    lua_pushcfunction(g_L, Entity_GetColor); lua_setfield(g_L, -2, "GetColor");
+    lua_pushcfunction(g_L, Entity_SetColor); lua_setfield(g_L, -2, "SetColor");
+    lua_pushcfunction(g_L, Entity_GetDropRNG); lua_setfield(g_L, -2, "GetDropRNG");
     lua_pushcfunction(g_L, Entity_Kill); lua_setfield(g_L, -2, "Kill");
     lua_pushcfunction(g_L, Entity_Remove); lua_setfield(g_L, -2, "Remove");
     lua_pop(g_L, 1);
@@ -1198,6 +1925,39 @@ ItemConfig = {
     lua_pushcfunction(g_L, Player_GetPlayerType); lua_setfield(g_L, -2, "GetPlayerType");
     lua_pushcfunction(g_L, Player_GetName); lua_setfield(g_L, -2, "GetName");
     lua_pushcfunction(g_L, Player_HasCollectible); lua_setfield(g_L, -2, "HasCollectible");
+    lua_pushcfunction(g_L, Player_GetEffects); lua_setfield(g_L, -2, "GetEffects");
+    lua_pushcfunction(g_L, PushDummyRNG); lua_setfield(g_L, -2, "GetCardRNG");
+    lua_pushcfunction(g_L, PushDummyRNG); lua_setfield(g_L, -2, "GetPillRNG");
+    lua_pushcfunction(g_L, PushDummyRNG); lua_setfield(g_L, -2, "GetTrinketRNG");
+    lua_pushcfunction(g_L, PushDummyRNG); lua_setfield(g_L, -2, "GetCollectibleRNG");
+    lua_pushcfunction(g_L, Player_GetTrinketMultiplier); lua_setfield(g_L, -2, "GetTrinketMultiplier");
+    lua_pushcfunction(g_L, Player_GetCollectibleNum); lua_setfield(g_L, -2, "GetCollectibleNum");
+    lua_pushcfunction(g_L, Player_GetSmeltedTrinkets); lua_setfield(g_L, -2, "GetSmeltedTrinkets");
+    lua_pushcfunction(g_L, Player_GetTrinket); lua_setfield(g_L, -2, "GetTrinket");
+    lua_pushcfunction(g_L, Player_GetCard); lua_setfield(g_L, -2, "GetCard");
+    lua_pushcfunction(g_L, Player_GetPill); lua_setfield(g_L, -2, "GetPill");
+    lua_pushcfunction(g_L, Player_GetEffectiveMaxHearts); lua_setfield(g_L, -2, "GetEffectiveMaxHearts");
+    lua_pushcfunction(g_L, Player_GetBrokenHearts); lua_setfield(g_L, -2, "GetBrokenHearts");
+    lua_pushcfunction(g_L, Player_GetSoulCharge); lua_setfield(g_L, -2, "GetSoulCharge");
+    lua_pushcfunction(g_L, Player_GetBloodCharge); lua_setfield(g_L, -2, "GetBloodCharge");
+    lua_pushcfunction(g_L, Player_GetPoopMana); lua_setfield(g_L, -2, "GetPoopMana");
+    lua_pushcfunction(g_L, Player_GetPoopSpell); lua_setfield(g_L, -2, "GetPoopSpell");
+    lua_pushcfunction(g_L, Player_GetPlayerFormCounter); lua_setfield(g_L, -2, "GetPlayerFormCounter");
+    lua_pushcfunction(g_L, Player_HasPlayerForm); lua_setfield(g_L, -2, "HasPlayerForm");
+    lua_pushcfunction(g_L, Player_HasGoldenBomb); lua_setfield(g_L, -2, "HasGoldenBomb");
+    lua_pushcfunction(g_L, Player_HasTrinket); lua_setfield(g_L, -2, "HasTrinket");
+    lua_pushcfunction(g_L, Player_IsSubPlayer); lua_setfield(g_L, -2, "IsSubPlayer");
+    lua_pushcfunction(g_L, Player_CanPickRedHearts); lua_setfield(g_L, -2, "CanPickRedHearts");
+    lua_pushcfunction(g_L, Player_GetBabySkin); lua_setfield(g_L, -2, "GetBabySkin");
+    lua_pushcfunction(g_L, Player_GetMainTwin); lua_setfield(g_L, -2, "GetMainTwin");
+    lua_pushcfunction(g_L, Player_GetOtherTwin); lua_setfield(g_L, -2, "GetOtherTwin");
+    lua_pushcfunction(g_L, Player_AddCollectible); lua_setfield(g_L, -2, "AddCollectible");
+    lua_pushcfunction(g_L, Player_RemoveCollectible); lua_setfield(g_L, -2, "RemoveCollectible");
+    lua_pushcfunction(g_L, Player_GetZodiacEffect); lua_setfield(g_L, -2, "GetZodiacEffect");
+    lua_pushcfunction(g_L, Player_GetModelingClayEffect); lua_setfield(g_L, -2, "GetModelingClayEffect");
+    lua_pushcfunction(g_L, Player_GetGlyphOfBalanceDrop); lua_setfield(g_L, -2, "GetGlyphOfBalanceDrop");
+    lua_pushcfunction(g_L, Entity_GetSprite); lua_setfield(g_L, -2, "GetSprite");
+    lua_pushcfunction(g_L, Player_isMainPlayer); lua_setfield(g_L, -2, "isMainPlayer");
     lua_pop(g_L, 1);
 
     // 4. IsaacRoom
@@ -1206,6 +1966,33 @@ ItemConfig = {
     lua_pushcfunction(g_L, Room_GetCenterPos); lua_setfield(g_L, -2, "GetCenterPos");
     lua_pushcfunction(g_L, Room_GetGridIndex); lua_setfield(g_L, -2, "GetGridIndex");
     lua_pushcfunction(g_L, Room_IsClear); lua_setfield(g_L, -2, "IsClear");
+    lua_pushcfunction(g_L, Room_IsFirstVisit); lua_setfield(g_L, -2, "IsFirstVisit");
+    lua_pushcfunction(g_L, Room_TriggerClear); lua_setfield(g_L, -2, "TriggerClear");
+    lua_pushcfunction(g_L, Room_GetSpawnSeed); lua_setfield(g_L, -2, "GetSpawnSeed");
+    lua_pushcfunction(g_L, Room_GetDecorationSeed); lua_setfield(g_L, -2, "GetDecorationSeed");
+    lua_pushcfunction(g_L, Room_IsPositionInRoom); lua_setfield(g_L, -2, "IsPositionInRoom");
+    lua_pushcfunction(g_L, Room_Update); lua_setfield(g_L, -2, "Update");
+    lua_pushcfunction(g_L, Room_MamaMegaExplosion); lua_setfield(g_L, -2, "MamaMegaExplosion");
+    lua_pushcfunction(g_L, Room_GetRenderMode); lua_setfield(g_L, -2, "GetRenderMode");
+    lua_pushcfunction(g_L, Room_RemoveGridEntity); lua_setfield(g_L, -2, "RemoveGridEntity");
+    lua_pushcfunction(g_L, Room_GetGridPosition); lua_setfield(g_L, -2, "GetGridPosition");
+    lua_pushcfunction(g_L, Room_HasWater); lua_setfield(g_L, -2, "HasWater");
+    lua_pushcfunction(g_L, Room_HasLava); lua_setfield(g_L, -2, "HasLava");
+    lua_pushcfunction(g_L, Room_GetFrameCount); lua_setfield(g_L, -2, "GetFrameCount");
+    lua_pushcfunction(g_L, Room_GetRandomPosition); lua_setfield(g_L, -2, "GetRandomPosition");
+    lua_pushcfunction(g_L, Room_IsMirrorWorld); lua_setfield(g_L, -2, "IsMirrorWorld");
+    lua_pushcfunction(g_L, Room_GetDoor); lua_setfield(g_L, -2, "GetDoor");
+    lua_pushcfunction(g_L, Room_RemoveDoor); lua_setfield(g_L, -2, "RemoveDoor");
+    lua_pushcfunction(g_L, Room_FindFreeTilePosition); lua_setfield(g_L, -2, "FindFreeTilePosition");
+    lua_pushcfunction(g_L, Room_GetGridWidth); lua_setfield(g_L, -2, "GetGridWidth");
+    lua_pushcfunction(g_L, Room_GetGridHeight); lua_setfield(g_L, -2, "GetGridHeight");
+    lua_pushcfunction(g_L, Room_SetFloorColor); lua_setfield(g_L, -2, "SetFloorColor");
+    lua_pushcfunction(g_L, Room_SetWallColor); lua_setfield(g_L, -2, "SetWallColor");
+    lua_pushcfunction(g_L, Room_GetBackdropType); lua_setfield(g_L, -2, "GetBackdropType");
+    lua_pushcfunction(g_L, Room_GetGridEntity); lua_setfield(g_L, -2, "GetGridEntity");
+    lua_pushcfunction(g_L, Room_GetRenderScrollOffset); lua_setfield(g_L, -2, "GetRenderScrollOffset");
+    lua_pushcfunction(g_L, Room_IsCurrentRoomLastBoss); lua_setfield(g_L, -2, "IsCurrentRoomLastBoss");
+    lua_pushcfunction(g_L, Room_GetRoomConfigStage); lua_setfield(g_L, -2, "GetRoomConfigStage");
     lua_pushvalue(g_L, -1); lua_setfield(g_L, -2, "__index");
     lua_pop(g_L, 1);
 
@@ -1216,7 +2003,14 @@ ItemConfig = {
     lua_pushcfunction(g_L, Game_GetFrameCount); lua_setfield(g_L, -2, "GetFrameCount");
     lua_pushcfunction(g_L, Game_GetNumPlayers); lua_setfield(g_L, -2, "GetNumPlayers");
     lua_pushcfunction(g_L, Game_Spawn); lua_setfield(g_L, -2, "Spawn");
-    lua_pushvalue(g_L, -1); lua_setfield(g_L, -2, "__index");
+    lua_pushcfunction(g_L, Game_GetHUD); lua_setfield(g_L, -2, "GetHUD");
+    lua_pushcfunction(g_L, Game_GetSeeds); lua_setfield(g_L, -2, "GetSeeds");
+    lua_pushcfunction(g_L, Game_GetItemPool); lua_setfield(g_L, -2, "GetItemPool");
+    lua_pushcfunction(g_L, Game_IsGreedMode); lua_setfield(g_L, -2, "IsGreedMode");
+    lua_pushcfunction(g_L, Game_GetStateFlag); lua_setfield(g_L, -2, "GetStateFlag");
+    lua_pushcfunction(g_L, Game_IsPaused); lua_setfield(g_L, -2, "IsPaused");
+    lua_pushcfunction(g_L, Game_GetVictoryLap); lua_setfield(g_L, -2, "GetVictoryLap");
+    lua_pushcfunction(g_L, Game_index); lua_setfield(g_L, -2, "__index");
     lua_pop(g_L, 1);
 
     // 6. IsaacLevel
@@ -1226,27 +2020,65 @@ ItemConfig = {
     lua_pushcfunction(g_L, Level_GetCurrentRoomIndex); lua_setfield(g_L, -2, "GetCurrentRoomIndex");
     lua_pushcfunction(g_L, Level_GetCurses); lua_setfield(g_L, -2, "GetCurses");
     lua_pushcfunction(g_L, Level_GetPlanetariumChance); lua_setfield(g_L, -2, "GetPlanetariumChance");
+    lua_pushcfunction(g_L, Level_GetCurrentRoomDesc); lua_setfield(g_L, -2, "GetCurrentRoomDesc");
+    lua_pushcfunction(g_L, Level_GetLastRoomDesc); lua_setfield(g_L, -2, "GetLastRoomDesc");
+    lua_pushcfunction(g_L, Level_GetRoomByIdx); lua_setfield(g_L, -2, "GetRoomByIdx");
+    lua_pushcfunction(g_L, Level_GetRooms); lua_setfield(g_L, -2, "GetRooms");
+    lua_pushcfunction(g_L, Level_GetCurrentRoom); lua_setfield(g_L, -2, "GetCurrentRoom");
+    lua_pushcfunction(g_L, Level_GetStartingRoomIndex); lua_setfield(g_L, -2, "GetStartingRoomIndex");
+    lua_pushcfunction(g_L, Level_GetAbsoluteStage); lua_setfield(g_L, -2, "GetAbsoluteStage");
+    lua_pushcfunction(g_L, Level_IsAscent); lua_setfield(g_L, -2, "IsAscent");
+    lua_pushcfunction(g_L, Level_IsPreAscent); lua_setfield(g_L, -2, "IsPreAscent");
+    lua_pushcfunction(g_L, Level_UncoverHiddenDoor); lua_setfield(g_L, -2, "UncoverHiddenDoor");
+    lua_pushcfunction(g_L, Level_MakeRedRoomDoor); lua_setfield(g_L, -2, "MakeRedRoomDoor");
     lua_pushvalue(g_L, -1); lua_setfield(g_L, -2, "__index");
     lua_pop(g_L, 1);
 
     // Create Isaac Global Table
     lua_newtable(g_L);
     lua_pushcfunction(g_L, Isaac_DebugString); lua_setfield(g_L, -2, "DebugString");
+    lua_pushcfunction(g_L, Isaac_ConsoleOutput); lua_setfield(g_L, -2, "ConsoleOutput");
     lua_pushcfunction(g_L, Isaac_GetPlayer); lua_setfield(g_L, -2, "GetPlayer");
     lua_pushcfunction(g_L, Isaac_GetRoom); lua_setfield(g_L, -2, "GetRoom");
     lua_pushcfunction(g_L, Isaac_GetGame); lua_setfield(g_L, -2, "GetGame");
     lua_pushcfunction(g_L, Isaac_Spawn); lua_setfield(g_L, -2, "Spawn");
     lua_pushcfunction(g_L, Isaac_FindByType); lua_setfield(g_L, -2, "FindByType");
     lua_pushcfunction(g_L, Isaac_CountEntities); lua_setfield(g_L, -2, "CountEntities");
+    lua_pushcfunction(g_L, Isaac_CountBosses); lua_setfield(g_L, -2, "CountBosses");
+    lua_pushcfunction(g_L, Isaac_CountEnemies); lua_setfield(g_L, -2, "CountEnemies");
+    lua_pushcfunction(g_L, Isaac_GetRoomEntities); lua_setfield(g_L, -2, "GetRoomEntities");
+    lua_pushcfunction(g_L, Isaac_FindInRadius); lua_setfield(g_L, -2, "FindInRadius");
+    lua_pushcfunction(g_L, Isaac_GetChallenge); lua_setfield(g_L, -2, "GetChallenge");
     lua_pushcfunction(g_L, Isaac_RenderText); lua_setfield(g_L, -2, "RenderText");
     lua_pushcfunction(g_L, Isaac_RenderScaledText); lua_setfield(g_L, -2, "RenderScaledText");
     lua_pushcfunction(g_L, Isaac_WorldToScreen); lua_setfield(g_L, -2, "WorldToScreen");
     lua_pushcfunction(g_L, Isaac_ScreenToWorld); lua_setfield(g_L, -2, "ScreenToWorld");
+    lua_pushcfunction(g_L, Isaac_WorldToRenderPosition); lua_setfield(g_L, -2, "WorldToRenderPosition");
+    lua_pushcfunction(g_L, Isaac_ScreenToWorldDistance); lua_setfield(g_L, -2, "ScreenToWorldDistance");
+    lua_pushcfunction(g_L, Isaac_Explode); lua_setfield(g_L, -2, "Explode");
+    lua_pushcfunction(g_L, Isaac_GridSpawn); lua_setfield(g_L, -2, "GridSpawn");
+    lua_pushcfunction(g_L, Isaac_ExecuteCommand); lua_setfield(g_L, -2, "ExecuteCommand");
     lua_pushcfunction(g_L, Isaac_GetItemIdByName); lua_setfield(g_L, -2, "GetItemIdByName");
     lua_pushcfunction(g_L, Isaac_GetTrinketIdByName); lua_setfield(g_L, -2, "GetTrinketIdByName");
     lua_pushcfunction(g_L, Isaac_GetCardIdByName); lua_setfield(g_L, -2, "GetCardIdByName");
     lua_pushcfunction(g_L, Isaac_GetPillEffectIdByName); lua_setfield(g_L, -2, "GetPillEffectIdByName");
+    lua_pushcfunction(g_L, Isaac_GetSoundIdByName); lua_setfield(g_L, -2, "GetSoundIdByName");
+    lua_pushcfunction(g_L, Isaac_GetMusicIdByName); lua_setfield(g_L, -2, "GetMusicIdByName");
+    lua_pushcfunction(g_L, Isaac_GetEntityVariantByName); lua_setfield(g_L, -2, "GetEntityVariantByName");
+    lua_pushcfunction(g_L, Isaac_GetEntityTypeByName); lua_setfield(g_L, -2, "GetEntityTypeByName");
+    lua_pushcfunction(g_L, Isaac_GetPlayerTypeByName); lua_setfield(g_L, -2, "GetPlayerTypeByName");
+    lua_pushcfunction(g_L, Isaac_GetCostumeIdByName); lua_setfield(g_L, -2, "GetCostumeIdByName");
+    lua_pushcfunction(g_L, Isaac_GetTime); lua_setfield(g_L, -2, "GetTime");
+    lua_pushcfunction(g_L, Isaac_IsInGame); lua_setfield(g_L, -2, "IsInGame");
+    lua_pushcfunction(g_L, Isaac_GetFrameCount); lua_setfield(g_L, -2, "GetFrameCount");
     lua_pushcfunction(g_L, Isaac_GetItemConfig); lua_setfield(g_L, -2, "GetItemConfig");
+    lua_pushcfunction(g_L, Isaac_SaveModData); lua_setfield(g_L, -2, "SaveModData");
+    lua_pushcfunction(g_L, Isaac_LoadModData); lua_setfield(g_L, -2, "LoadModData");
+    lua_pushcfunction(g_L, Isaac_HasModData); lua_setfield(g_L, -2, "HasModData");
+    lua_pushcfunction(g_L, Isaac_GetPersistentGameData); lua_setfield(g_L, -2, "GetPersistentGameData");
+    lua_pushcfunction(g_L, Isaac_GetCallbacks); lua_setfield(g_L, -2, "GetCallbacks");
+    lua_pushcfunction(g_L, Isaac_RunCallback); lua_setfield(g_L, -2, "RunCallback");
+    lua_pushcfunction(g_L, RegisterMod_fn); lua_setfield(g_L, -2, "RegisterMod");
     lua_setglobal(g_L, "Isaac");
 
     // ModCallbacks Table
@@ -1276,6 +2108,7 @@ ItemConfig = {
     lua_pushinteger(g_L, 64); lua_setfield(g_L, -2, "MC_PRE_ROOM_ENTITY_SPAWN");
     lua_pushinteger(g_L, 67); lua_setfield(g_L, -2, "MC_POST_GET_COLLECTIBLE");
     lua_pushinteger(g_L, 70); lua_setfield(g_L, -2, "MC_PRE_USE_ITEM");
+    lua_pushinteger(g_L, 100); lua_setfield(g_L, -2, "MC_HUD_RENDER");
     lua_setglobal(g_L, "ModCallbacks");
 
     // Enums: EntityType
@@ -1370,11 +2203,14 @@ static void DispatchCallback(int callbackId, std::function<void(lua_State*)> pus
             continue;
         }
 
-        int argCount = 0;
+        // Pass mod reference (self) as the FIRST argument
+        lua_rawgeti(g_L, LUA_REGISTRYINDEX, entry.modRef);
+        int argCount = 1;
+
         if (pushArgs) {
             int topBefore = lua_gettop(g_L);
             pushArgs(g_L);
-            argCount = lua_gettop(g_L) - topBefore;
+            argCount += (lua_gettop(g_L) - topBefore);
         }
 
         int err = lua_pcall(g_L, argCount, 1, 0);
@@ -1406,7 +2242,8 @@ void RepogonLuaDispatchUpdate(void) {
 
 void RepogonLuaDispatchRender(void) {
     RepogonOverlayClear();
-    DispatchCallback(2, nullptr); // MC_POST_RENDER (2)
+    DispatchCallback(2, nullptr);   // MC_POST_RENDER (2)
+    DispatchCallback(100, nullptr); // MC_HUD_RENDER (100)
     RepogonOverlayFlush();
 }
 
