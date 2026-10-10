@@ -5,6 +5,7 @@
 #import "RepogonModManager.h"
 #import "RepogonOverlay.h"
 #import "RepogonVoidPatch.h"
+#import "RepogonVFS.h"
 
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
@@ -74,23 +75,26 @@ void RepogonStart(void) {
         RepogonLog(@"Initializing Isaac REPENTOGON iOS (base: 0x%lx)", (unsigned long)base);
         RepogonLog(@"==================================================");
 
-        // 1. Initialize Screen Overlay
+        // 1. Initialize Virtual File System & Asset Redirection
+        RepogonVFSInit();
+
+        // 2. Initialize Screen Overlay
         RepogonOverlayInit();
 
-        // 2. Initialize Lua 5.3 runtime
+        // 3. Initialize Lua 5.3 runtime
         if (!RepogonLuaInit()) {
             RepogonLog(@"Fatal: Failed to initialize Lua runtime.");
             return;
         }
 
-        // 3. Initialize Mod Manager & discover mods in Documents/mods
+        // 4. Initialize Mod Manager & discover mods in Documents/mods
         RepogonModManagerInit();
         RepogonModManagerScanAndLoadMods();
 
-        // 4. Notify mods of game start
+        // 5. Notify mods of game start
         RepogonLuaDispatchGameStarted(false);
 
-        // 5. Setup display link for 60fps frame tick
+        // 6. Setup display link for 60fps frame tick
         dispatch_async(dispatch_get_main_queue(), ^{
             g_tickTarget = [[RepogonTickTarget alloc] init];
             g_displayLink = [CADisplayLink displayLinkWithTarget:g_tickTarget selector:@selector(onFrameTick:)];
@@ -102,6 +106,7 @@ void RepogonStart(void) {
 
 __attribute__((constructor)) static void RepogonConstructor(void) {
     @autoreleasepool {
+        RepogonVFSInit();
         dispatch_async(dispatch_get_main_queue(), ^{
             NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
             [center addObserverForName:UIApplicationDidBecomeActiveNotification

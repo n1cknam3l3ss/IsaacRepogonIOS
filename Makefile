@@ -23,6 +23,9 @@ OBJCXX_DIR := $(PROJECT_ROOT)/src
 OBJCXX_SRCS := $(wildcard $(OBJCXX_DIR)/*.mm)
 OBJCXX_OBJS := $(patsubst $(OBJCXX_DIR)/%.mm, $(PROJECT_ROOT)/build/src/%.o, $(OBJCXX_SRCS))
 
+C_SRCS := $(wildcard $(OBJCXX_DIR)/*.c)
+C_OBJS := $(patsubst $(OBJCXX_DIR)/%.c, $(PROJECT_ROOT)/build/src/%_c.o, $(C_SRCS))
+
 .PHONY: all dylib package livecontainer dist clean
 
 all: dylib package livecontainer dist
@@ -32,6 +35,11 @@ $(PROJECT_ROOT)/build/lua/%.o: $(LUA_DIR)/%.c
 	"$(CLANG)" -isysroot "$(SDK)" -arch arm64 -miphoneos-version-min="$(MIN_IOS)" \
 		-O2 -DLUA_USE_POSIX -I"$(LUA_DIR)" -c $< -o $@
 
+$(PROJECT_ROOT)/build/src/%_c.o: $(OBJCXX_DIR)/%.c
+	@mkdir -p "$(PROJECT_ROOT)/build/src"
+	"$(CLANG)" -isysroot "$(SDK)" -arch arm64 -miphoneos-version-min="$(MIN_IOS)" \
+		-O2 -I"$(PROJECT_ROOT)/include" -c $< -o $@
+
 $(PROJECT_ROOT)/build/src/%.o: $(OBJCXX_DIR)/%.mm
 	@mkdir -p "$(PROJECT_ROOT)/build/src"
 	"$(CLANGXX)" -isysroot "$(SDK)" -arch arm64 -miphoneos-version-min="$(MIN_IOS)" \
@@ -39,12 +47,12 @@ $(PROJECT_ROOT)/build/src/%.o: $(OBJCXX_DIR)/%.mm
 
 dylib: $(DYLIB)
 
-$(DYLIB): $(LUA_OBJS) $(OBJCXX_OBJS)
+$(DYLIB): $(LUA_OBJS) $(OBJCXX_OBJS) $(C_OBJS)
 	@mkdir -p "$(PROJECT_ROOT)/build"
 	"$(CLANGXX)" -isysroot "$(SDK)" -arch arm64 -miphoneos-version-min="$(MIN_IOS)" \
 		-dynamiclib -Wl,-install_name,@rpath/$(notdir $(DYLIB)) -Wl,-dead_strip \
 		-Wl,-exported_symbols_list,"$(PROJECT_ROOT)/package/exports.txt" \
-		$(LUA_OBJS) $(OBJCXX_OBJS) -framework Foundation -framework UIKit -framework QuartzCore -lc++ -o "$(DYLIB)"
+		$(LUA_OBJS) $(OBJCXX_OBJS) $(C_OBJS) -framework Foundation -framework UIKit -framework QuartzCore -lc++ -o "$(DYLIB)"
 	xcrun strip -x "$(DYLIB)"
 	@if command -v codesign >/dev/null 2>&1; then codesign --force --sign - --timestamp=none "$(DYLIB)"; elif command -v ldid >/dev/null 2>&1; then ldid -S "$(DYLIB)"; fi
 

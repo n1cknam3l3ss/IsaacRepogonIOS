@@ -3,3 +3,6 @@ _RepogonTick
 _RepogonGetBaseAddress
 _RepogonIsSupportedBuild
 _RepogonVoidWatchdogTick
+_RepogonVFSInit
+_RepogonVFSRedirectPath
+_rebind_symbols

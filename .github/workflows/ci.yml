@@ -44,22 +44,21 @@ jobs:
         if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.0
-          name: "Isaac REPENTOGON iOS v1.0.0 (Phase 3 Lua Runtime Initial Release)"
+          tag_name: v1.1.0
+          name: "Isaac REPENTOGON iOS v1.1.0 (Asset Redirection & XML Merger)"
           body: |
-            ## Isaac REPENTOGON iOS (v1.0.0)
+            ## Isaac REPENTOGON iOS (v1.1.0)
 
-            **Lua Modding Runtime & Script Loader for The Binding of Isaac on iOS**
+            **Virtual File System (VFS) Asset Redirection & Dynamic XML Merger**
 
-            ### Features:
-            - **Embedded Lua 5.3 Runtime**: Full Lua 5.3 engine running inside Isaac on iOS.
-            - **Mod Discovery**: Loads mods directly from `Documents/mods/<ModName>/main.lua`.
-            - **Auto-Starter Mod**: Initializes `Documents/mods/RepogonTest/main.lua` automatically.
-            - **ModCallbacks Engine**: Supports `MC_POST_UPDATE`, `MC_POST_RENDER`, `MC_POST_PEFFECT_UPDATE`, `MC_POST_NEW_ROOM`, `MC_POST_NEW_LEVEL`, `MC_POST_GAME_STARTED`, and more.
-            - **Isaac API**: `Isaac.DebugString`, `Isaac.GetPlayer`, `Isaac.GetRoom`, `Isaac.GetGame`, `Isaac.Spawn`, `Isaac.FindByType`, `Isaac.RenderText`, `Isaac.RenderScaledText`, `Vector`, `KColor`.
-            - **Screen Text Overlay**: Renders in-game mod text on iOS display with custom colors and scaling.
-            - **Logging**: Mod print statements and logs are recorded directly to `Documents/repogon_log.txt`.
-            - **Bonus**: Includes Rep+ guaranteed Void portals after Mega Satan, Mother, The Lamb, and ???.
+            ### What's New in v1.1.0:
+            - **Fishhook VFS Asset Redirection**: Hooks `fopen`, `open`, `stat`, `access` on iOS. Any sprite, sound, `.anm2`, or texture in `Documents/mods/<ModName>/resources/` is automatically redirected and loaded by the game engine without modifying the IPA!
+            - **Dynamic XML Merging**: Automatically parses and merges modded `players.xml`, `items.xml`, `entities2.xml`, and `costumes2.xml` from all active mods on startup into a unified cache.
+            - **Full Mod Autonomy**: Download any mod folder from Steam Workshop or the community, drop it into `Documents/mods/`, and Isaac loads both the Lua script and custom assets automatically!
+            - **Lua 5.3 Modding Runtime**: `RegisterMod`, `MC_POST_UPDATE`, `MC_POST_RENDER`, `MC_POST_PEFFECT_UPDATE`, etc.
+            - **Touch-Passthrough Text Overlay**: Direct mod text rendering via `Isaac.RenderText`.
+            - **Live Logging**: `Documents/repogon_log.txt`.
+            - **Guaranteed Void Portals**: 100% Void portal spawn logic included.
 
             ### Installation:
             - **LiveContainer**: Import `IsaacRepogonIOS-LiveContainer.framework.zip`.

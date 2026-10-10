@@ -1,11 +1,16 @@
 #import "RepogonModManager.h"
 #import "RepogonLua.h"
 #import "RepogonLogger.h"
+#import "RepogonVFS.h"
+#import "RepogonXMLMerger.h"
 
 extern "C" {
 #include "lua.h"
 #include "lauxlib.h"
 }
+
+#include <vector>
+#include <string>
 
 static NSString *g_modsDirectory = nil;
 
@@ -75,11 +80,28 @@ void RepogonModManagerScanAndLoadMods(void) {
         return;
     }
 
-    // Sort alphabetically
     items = [items sortedArrayUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
-
     RepogonLog(@"Discovered %lu items in %@", (unsigned long)items.count, modsDir);
 
+    std::vector<std::string> validModDirs;
+    for (NSString *item in items) {
+        NSString *modPath = [modsDir stringByAppendingPathComponent:item];
+        BOOL isDir = NO;
+        if ([fm fileExistsAtPath:modPath isDirectory:&isDir] && isDir) {
+            validModDirs.push_back([modPath UTF8String]);
+        }
+    }
+
+    // 1. Register with Virtual File System for asset redirection
+    RepogonVFSClearModDirectories();
+    for (const auto &d : validModDirs) {
+        RepogonVFSAddModDirectory(d.c_str());
+    }
+
+    // 2. Perform dynamic XML merging (players.xml, items.xml, etc.)
+    RepogonXMLMergerProcessMods(validModDirs);
+
+    // 3. Load Lua scripts
     lua_State *L = RepogonLuaGetState();
 
     for (NSString *item in items) {
@@ -89,7 +111,6 @@ void RepogonModManagerScanAndLoadMods(void) {
 
         NSString *mainLuaPath = [modPath stringByAppendingPathComponent:@"main.lua"];
         if (![fm fileExistsAtPath:mainLuaPath]) {
-            RepogonLog(@"Mod folder [%@] has no main.lua; skipping.", item);
             continue;
         }
 
