@@ -728,15 +728,7 @@ static int Player_HasCollectible(lua_State *L) {
     return 1;
 }
 
-static int Player_GetOtherTwin(lua_State *L) { lua_pushnil(L); return 1; }
-static int Player_GetSmeltedTrinkets(lua_State *L) { lua_newtable(L); return 1; }
 static int Player_GetBagOfCraftingContent(lua_State *L) { lua_newtable(L); return 1; }
-static int Player_GetGlyphOfBalanceDrop(lua_State *L) {
-    lua_newtable(L);
-    lua_pushinteger(L, -1); lua_rawseti(L, -2, 1);
-    lua_pushinteger(L, 0); lua_rawseti(L, -2, 2);
-    return 1;
-}
 static int Player_GetSubPlayer(lua_State *L) { lua_pushnil(L); return 1; }
 
 static int PushDummyRNG(lua_State *L) {
@@ -790,7 +782,12 @@ static int Player_AddCollectible(lua_State *L) { return 0; }
 static int Player_RemoveCollectible(lua_State *L) { return 0; }
 static int Player_GetZodiacEffect(lua_State *L) { lua_pushinteger(L, 0); return 1; }
 static int Player_GetModelingClayEffect(lua_State *L) { lua_pushinteger(L, 0); return 1; }
-static int Player_GetGlyphOfBalanceDrop(lua_State *L) { lua_pushinteger(L, 0); return 1; }
+static int Player_GetGlyphOfBalanceDrop(lua_State *L) {
+    lua_newtable(L);
+    lua_pushinteger(L, -1); lua_rawseti(L, -2, 1);
+    lua_pushinteger(L, 0); lua_rawseti(L, -2, 2);
+    return 1;
+}
 static int Player_isMainPlayer(lua_State *L) { lua_pushboolean(L, 1); return 1; }
 
 void PushPlayer(lua_State *L, uintptr_t player) {
