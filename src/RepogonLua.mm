@@ -211,6 +211,13 @@ static int KColor_new(lua_State *L) {
     lua_pushnumber(L, g); lua_setfield(L, -2, "Green");
     lua_pushnumber(L, b); lua_setfield(L, -2, "Blue");
     lua_pushnumber(L, a); lua_setfield(L, -2, "Alpha");
+    lua_pushnumber(L, r); lua_setfield(L, -2, "R");
+    lua_pushnumber(L, g); lua_setfield(L, -2, "G");
+    lua_pushnumber(L, b); lua_setfield(L, -2, "B");
+    lua_pushnumber(L, a); lua_setfield(L, -2, "A");
+    lua_pushnumber(L, 0); lua_setfield(L, -2, "RO");
+    lua_pushnumber(L, 0); lua_setfield(L, -2, "GO");
+    lua_pushnumber(L, 0); lua_setfield(L, -2, "BO");
     return 1;
 }
 
@@ -262,6 +269,11 @@ static int Sprite_new(lua_State *L) {
     lua_pushcfunction(L, dummyFunc); lua_setfield(L, -2, "ReplaceSpritesheet");
     lua_pushcfunction(L, dummyFunc); lua_setfield(L, -2, "LoadGraphics");
     lua_pushcfunction(L, dummyFunc); lua_setfield(L, -2, "Reset");
+    lua_pushcfunction(L, [](lua_State *st) -> int { lua_pushboolean(st, 1); return 1; }); lua_setfield(L, -2, "IsFinished");
+    lua_pushcfunction(L, [](lua_State *st) -> int { lua_pushboolean(st, 1); return 1; }); lua_setfield(L, -2, "IsPlaying");
+    lua_pushcfunction(L, [](lua_State *st) -> int { lua_pushstring(st, ""); return 1; }); lua_setfield(L, -2, "GetAnimation");
+    lua_pushcfunction(L, [](lua_State *st) -> int { lua_pushinteger(st, 0); return 1; }); lua_setfield(L, -2, "GetFrame");
+    lua_pushcfunction(L, dummyFunc); lua_setfield(L, -2, "Colorize");
     return 1;
 }
 
@@ -280,6 +292,13 @@ static uintptr_t CheckEntityPtr(lua_State *L, int index) {
 static int Entity_index(lua_State *L) {
     uintptr_t ent = CheckEntityPtr(L, 1);
     const char *key = luaL_checkstring(L, 2);
+
+    // Check entity metatable methods first
+    luaL_getmetatable(L, "IsaacEntity");
+    lua_pushvalue(L, 2);
+    lua_rawget(L, -2);
+    if (!lua_isnil(L, -1)) return 1;
+    lua_pop(L, 2);
 
     if (!ent) return 0;
 
@@ -305,11 +324,7 @@ static int Entity_index(lua_State *L) {
         lua_pushinteger(L, 0); return 1;
     }
 
-    // Check entity metatable methods
-    luaL_getmetatable(L, "IsaacEntity");
-    lua_pushvalue(L, 2);
-    lua_rawget(L, -2);
-    return 1;
+    return 0;
 }
 
 static int Entity_newindex(lua_State *L) {
@@ -385,13 +400,6 @@ void PushEntity(lua_State *L, uintptr_t ent) {
 static int Player_index(lua_State *L) {
     uintptr_t player = CheckEntityPtr(L, 1);
     const char *key = luaL_checkstring(L, 2);
-    if (!player) return 0;
-
-    if (strcmp(key, "Damage") == 0) {
-        lua_pushnumber(L, RepogonPlayerGetDamage(player)); return 1;
-    } else if (strcmp(key, "MoveSpeed") == 0) {
-        lua_pushnumber(L, RepogonPlayerGetMoveSpeed(player)); return 1;
-    }
 
     // Check Player metatable methods first
     luaL_getmetatable(L, "IsaacPlayer");
@@ -399,6 +407,14 @@ static int Player_index(lua_State *L) {
     lua_rawget(L, -2);
     if (!lua_isnil(L, -1)) return 1;
     lua_pop(L, 2);
+
+    if (player) {
+        if (strcmp(key, "Damage") == 0) {
+            lua_pushnumber(L, RepogonPlayerGetDamage(player)); return 1;
+        } else if (strcmp(key, "MoveSpeed") == 0) {
+            lua_pushnumber(L, RepogonPlayerGetMoveSpeed(player)); return 1;
+        }
+    }
 
     // Fall back to Entity indexing
     return Entity_index(L);
@@ -547,7 +563,6 @@ static int Player_HasCollectible(lua_State *L) {
 }
 
 void PushPlayer(lua_State *L, uintptr_t player) {
-    if (!player) { lua_pushnil(L); return; }
     lua_newtable(L);
     lua_pushinteger(L, static_cast<lua_Integer>(player));
     lua_setfield(L, -2, "__ptr");
@@ -580,7 +595,6 @@ static int Room_IsClear(lua_State *L) {
 }
 
 void PushRoom(lua_State *L, uintptr_t room) {
-    if (!room) { lua_pushnil(L); return; }
     lua_newtable(L);
     lua_pushinteger(L, static_cast<lua_Integer>(room));
     lua_setfield(L, -2, "__ptr");
@@ -623,7 +637,6 @@ static int Game_GetNumPlayers(lua_State *L) {
 }
 
 void PushGame(lua_State *L, uintptr_t game) {
-    if (!game) { lua_pushnil(L); return; }
     lua_newtable(L);
     lua_pushinteger(L, static_cast<lua_Integer>(game));
     lua_setfield(L, -2, "__ptr");
@@ -782,6 +795,18 @@ static int Isaac_GetPillEffectIdByName(lua_State *L) {
     return 1;
 }
 
+static int PushDummyItemEntry(lua_State *L) {
+    lua_newtable(L);
+    lua_pushstring(L, "Item"); lua_setfield(L, -2, "Name");
+    lua_pushstring(L, ""); lua_setfield(L, -2, "Description");
+    lua_pushboolean(L, 0); lua_setfield(L, -2, "Hidden");
+    lua_pushinteger(L, 0); lua_setfield(L, -2, "ID");
+    lua_pushinteger(L, 0); lua_setfield(L, -2, "Type");
+    lua_pushinteger(L, 0); lua_setfield(L, -2, "InitCharge");
+    lua_pushinteger(L, 0); lua_setfield(L, -2, "MaxCharges");
+    return 1;
+}
+
 static int Isaac_GetItemConfig(lua_State *L) {
     lua_newtable(L);
     lua_pushcfunction(L, [](lua_State *st) -> int {
@@ -805,11 +830,11 @@ static int Isaac_GetItemConfig(lua_State *L) {
     });
     lua_setfield(L, -2, "GetCards");
 
-    lua_pushcfunction(L, [](lua_State *st) -> int {
-        lua_newtable(st);
-        return 1;
-    });
-    lua_setfield(L, -2, "GetCollectible");
+    lua_pushcfunction(L, PushDummyItemEntry); lua_setfield(L, -2, "GetCollectible");
+    lua_pushcfunction(L, PushDummyItemEntry); lua_setfield(L, -2, "GetTrinket");
+    lua_pushcfunction(L, PushDummyItemEntry); lua_setfield(L, -2, "GetCard");
+    lua_pushcfunction(L, PushDummyItemEntry); lua_setfield(L, -2, "GetPillEffect");
+    lua_pushcfunction(L, PushDummyItemEntry); lua_setfield(L, -2, "GetNullItem");
     return 1;
 }
 
@@ -949,19 +974,160 @@ bool RepogonLuaInit(void) {
 
     // Preload json library
     if (kJsonLuaSource) {
-        luaL_dostring(g_L, kJsonLuaSource);
+        int err = luaL_dostring(g_L, kJsonLuaSource);
+        if (err != LUA_OK) {
+            const char *msg = lua_tostring(g_L, -1);
+            RepogonLog(@"[RepogonLua] Error loading embedded json module: %s", msg ? msg : "unknown");
+            lua_pop(g_L, 1);
+        } else {
+            RepogonLog(@"[RepogonLua] Embedded json module registered successfully.");
+        }
     }
 
-    // Dynamic enum tables with fallback metatable
-    luaL_dostring(g_L,
-        "local meta = { __index = function(t, k) return 1 end }\n"
-        "CollectibleType = setmetatable({ COLLECTIBLE_KEY_PIECE_1 = 238, COLLECTIBLE_KEY_PIECE_2 = 239 }, meta)\n"
-        "TrinketType = setmetatable({}, meta)\n"
-        "Card = setmetatable({}, meta)\n"
-        "PillEffect = setmetatable({}, meta)\n"
-        "ButtonAction = setmetatable({}, meta)\n"
-        "Keyboard = setmetatable({}, meta)\n"
-    );
+    // Dynamic enum tables and BitSet128 implementation
+    const char *kInitScript = R"RAW_INIT(
+local BitSet128_mt = {}
+BitSet128_mt.__index = BitSet128_mt
+
+function BitSet128_mt:Set(bit)
+    if bit < 64 then self.l = self.l | (1 << bit)
+    else self.h = self.h | (1 << (bit - 64)) end
+    return self
+end
+
+function BitSet128_mt:Clear(bit)
+    if bit < 64 then self.l = self.l & ~(1 << bit)
+    else self.h = self.h & ~(1 << (bit - 64)) end
+    return self
+end
+
+function BitSet128_mt:Has(bit)
+    if bit < 64 then return (self.l & (1 << bit)) ~= 0
+    else return (self.h & (1 << (bit - 64))) ~= 0 end
+end
+
+function BitSet128_mt:Empty()
+    return self.l == 0 and self.h == 0
+end
+
+function BitSet128_mt.__bor(a, b)
+    local al, ah = (type(a) == 'table' and a.l or a or 0), (type(a) == 'table' and a.h or 0)
+    local bl, bh = (type(b) == 'table' and b.l or b or 0), (type(b) == 'table' and b.h or 0)
+    return setmetatable({ l = al | bl, h = ah | bh }, BitSet128_mt)
+end
+
+function BitSet128_mt.__band(a, b)
+    local al, ah = (type(a) == 'table' and a.l or a or 0), (type(a) == 'table' and a.h or 0)
+    local bl, bh = (type(b) == 'table' and b.l or b or 0), (type(b) == 'table' and b.h or 0)
+    return setmetatable({ l = al & bl, h = ah & bh }, BitSet128_mt)
+end
+
+function BitSet128_mt.__bxor(a, b)
+    local al, ah = (type(a) == 'table' and a.l or a or 0), (type(a) == 'table' and a.h or 0)
+    local bl, bh = (type(b) == 'table' and b.l or b or 0), (type(b) == 'table' and b.h or 0)
+    return setmetatable({ l = al ~ bl, h = ah ~ bh }, BitSet128_mt)
+end
+
+function BitSet128_mt.__bnot(a)
+    return setmetatable({ l = ~a.l, h = ~a.h }, BitSet128_mt)
+end
+
+function BitSet128_mt.__eq(a, b)
+    if type(a) ~= 'table' or type(b) ~= 'table' then return false end
+    return a.l == b.l and a.h == b.h
+end
+
+function BitSet128_mt.__tostring(a)
+    return string.format('BitSet128(0x%X, 0x%X)', a.l or 0, a.h or 0)
+end
+
+BitSet128 = function(l, h)
+    return setmetatable({ l = l or 0, h = h or 0 }, BitSet128_mt)
+end
+
+local enum_meta = {
+    __index = function(t, k)
+        if k == 'NUM_PILLS' then return 25 end
+        if k == 'NUM_CARDS' then return 90 end
+        if k == 'NUM_TRINKETS' then return 189 end
+        if k == 'NUM_COLLECTIBLES' then return 732 end
+        if type(k) == 'number' then return k end
+        return 1
+    end
+}
+
+local function make_enum(tbl)
+    return setmetatable(tbl or {}, enum_meta)
+end
+
+PillColor = make_enum({ PILL_NULL = 0, NUM_PILLS = 25 })
+PillEffect = make_enum({ PILLEFFECT_NULL = 0 })
+CollectibleType = make_enum({
+    COLLECTIBLE_NULL = 0,
+    COLLECTIBLE_KEY_PIECE_1 = 238,
+    COLLECTIBLE_KEY_PIECE_2 = 239,
+    NUM_COLLECTIBLES = 732
+})
+TrinketType = make_enum({ TRINKET_NULL = 0, NUM_TRINKETS = 189 })
+Card = make_enum({ CARD_NULL = 0, NUM_CARDS = 90 })
+ItemPoolType = make_enum({ POOL_NULL = -1, POOL_TREASURE = 0 })
+RoomType = make_enum({ ROOM_NULL = 0, ROOM_DEFAULT = 1 })
+RoomShape = make_enum({ ROOMSHAPE_1x1 = 1 })
+DoorSlot = make_enum({ NO_DOOR_SLOT = -1 })
+Direction = make_enum({ NO_DIRECTION = -1 })
+ButtonAction = make_enum({ ACTION_NULL = -1 })
+Keyboard = make_enum({ KEY_NULL = 0 })
+Controller = make_enum({})
+SoundEffect = make_enum({ SOUND_NULL = 0 })
+Music = make_enum({ MUSIC_NULL = 0 })
+LevelStage = make_enum({ STAGE_NULL = 0 })
+StageType = make_enum({ STAGETYPE_ORIGINAL = 0 })
+EntityFlag = make_enum({})
+TearFlag = make_enum({
+    TEAR_NORMAL = BitSet128(0, 0),
+    TEAR_SPECTRAL = BitSet128(1, 0),
+    TEAR_PIERCING = BitSet128(2, 0),
+    TEAR_HOMING = BitSet128(4, 0)
+})
+TearVariant = make_enum({ BLUE = 0 })
+BombVariant = make_enum({ BOMB_NORMAL = 0 })
+BabySubType = make_enum({ BABY_UNASSIGNED = 0 })
+PlayerType = make_enum({ PLAYER_ISAAC = 0 })
+LaserSubType = make_enum({})
+DamageFlag = make_enum({})
+UseFlag = make_enum({})
+CacheFlag = make_enum({
+    CACHE_DAMAGE = 1,
+    CACHE_FIREDELAY = 2,
+    CACHE_SHOTSPEED = 4,
+    CACHE_RANGE = 8,
+    CACHE_SPEED = 16,
+    CACHE_TEARFLAG = 32,
+    CACHE_TEARCOLOR = 64,
+    CACHE_FLYING = 128,
+    CACHE_WEAPON = 256,
+    CACHE_FAMILIARS = 512,
+    CACHE_LUCK = 1024,
+    CACHE_ALL = 0xFFFFFFFF
+})
+GridEntityType = make_enum({})
+SortingLayer = make_enum({})
+Dimension = make_enum({})
+SeedEffect = make_enum({})
+Challenge = make_enum({ CHALLENGE_NULL = 0 })
+
+ItemConfig = {
+    GetItemConfig = function() return Isaac.GetItemConfig() end,
+    Config = { GetItemConfig = function() return Isaac.GetItemConfig() end }
+}
+)RAW_INIT";
+
+    int initErr = luaL_dostring(g_L, kInitScript);
+    if (initErr != LUA_OK) {
+        const char *msg = lua_tostring(g_L, -1);
+        RepogonLog(@"[RepogonLua] Error running init script: %s", msg ? msg : "unknown");
+        lua_pop(g_L, 1);
+    }
 
     // Global RegisterMod
     lua_pushcfunction(g_L, RegisterMod_fn);
@@ -970,6 +1136,7 @@ bool RepogonLuaInit(void) {
     // Global constructors
     lua_pushcfunction(g_L, Vector_new); lua_setglobal(g_L, "Vector");
     lua_pushcfunction(g_L, KColor_new); lua_setglobal(g_L, "KColor");
+    lua_pushcfunction(g_L, KColor_new); lua_setglobal(g_L, "Color");
     lua_pushcfunction(g_L, Font_new); lua_setglobal(g_L, "Font");
     lua_pushcfunction(g_L, Sprite_new); lua_setglobal(g_L, "Sprite");
     lua_pushcfunction(g_L, [](lua_State *st) -> int {

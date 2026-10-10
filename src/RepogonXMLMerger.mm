@@ -13,10 +13,17 @@ static NSString *FindBaseXML(NSString *fileName) {
     NSFileManager *fm = [NSFileManager defaultManager];
 
     NSArray *candidates = @[
-        [bundlePath stringByAppendingPathComponent:[NSString stringWithFormat:@"repentance-resources/%@", fileName]],
+        [bundlePath stringByAppendingPathComponent:[NSString stringWithFormat:@"repentance-resources/data/%@", fileName]],
         [bundlePath stringByAppendingPathComponent:[NSString stringWithFormat:@"repentance-resources/content/%@", fileName]],
+        [bundlePath stringByAppendingPathComponent:[NSString stringWithFormat:@"repentance-resources/%@", fileName]],
+        [bundlePath stringByAppendingPathComponent:[NSString stringWithFormat:@"afterbirthplus-resources/data/%@", fileName]],
+        [bundlePath stringByAppendingPathComponent:[NSString stringWithFormat:@"afterbirthplus-resources/%@", fileName]],
+        [bundlePath stringByAppendingPathComponent:[NSString stringWithFormat:@"afterbirth-resources/data/%@", fileName]],
+        [bundlePath stringByAppendingPathComponent:[NSString stringWithFormat:@"rebirth-resources/data/%@", fileName]],
+        [bundlePath stringByAppendingPathComponent:[NSString stringWithFormat:@"resources/data/%@", fileName]],
+        [bundlePath stringByAppendingPathComponent:[NSString stringWithFormat:@"resources/content/%@", fileName]],
         [bundlePath stringByAppendingPathComponent:[NSString stringWithFormat:@"resources/%@", fileName]],
-        [bundlePath stringByAppendingPathComponent:[NSString stringWithFormat:@"resources/content/%@", fileName]]
+        [bundlePath stringByAppendingPathComponent:[NSString stringWithFormat:@"data/%@", fileName]]
     ];
 
     for (NSString *p in candidates) {

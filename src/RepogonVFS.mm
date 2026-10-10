@@ -16,7 +16,8 @@ namespace {
 
 static std::vector<std::string> g_modDirs;
 static std::unordered_map<std::string, std::string> g_redirectCache;
-static std::mutex g_vfsMutex;
+static std::recursive_mutex g_vfsMutex;
+static thread_local bool t_inVfs = false;
 
 static int (*orig_open)(const char *path, int oflag, ...) = nullptr;
 static FILE *(*orig_fopen)(const char *path, const char *mode) = nullptr;
@@ -41,26 +42,45 @@ static const char *GetBaseName(const char *path) {
     return lastSlash ? lastSlash + 1 : path;
 }
 
+static bool CheckFileExists(const std::string &path) {
+    if (orig_access) return orig_access(path.c_str(), F_OK) == 0;
+    struct stat st;
+    if (orig_stat) return orig_stat(path.c_str(), &st) == 0;
+    return access(path.c_str(), F_OK) == 0;
+}
+
 } // namespace
 
 void RepogonVFSAddModDirectory(const char *modDir) {
     if (!modDir) return;
-    std::lock_guard<std::mutex> lock(g_vfsMutex);
+    std::lock_guard<std::recursive_mutex> lock(g_vfsMutex);
     g_modDirs.push_back(modDir);
     g_redirectCache.clear();
     RepogonLog(@"[VFS] Registered active mod directory: %s", modDir);
 }
 
 void RepogonVFSClearModDirectories(void) {
-    std::lock_guard<std::mutex> lock(g_vfsMutex);
+    std::lock_guard<std::recursive_mutex> lock(g_vfsMutex);
     g_modDirs.clear();
     g_redirectCache.clear();
 }
 
 const char *RepogonVFSRedirectPath(const char *originalPath) {
     if (!originalPath || originalPath[0] == '\0') return originalPath;
+    if (t_inVfs) return originalPath;
 
-    std::lock_guard<std::mutex> lock(g_vfsMutex);
+    // Fast check: if the path is already inside mods/ or cache/, skip redirection
+    if (strstr(originalPath, "/mods/") != nullptr ||
+        strstr(originalPath, "/cache/") != nullptr) {
+        return originalPath;
+    }
+
+    struct VfsGuard {
+        VfsGuard() { t_inVfs = true; }
+        ~VfsGuard() { t_inVfs = false; }
+    } guard;
+
+    std::lock_guard<std::recursive_mutex> lock(g_vfsMutex);
 
     auto it = g_redirectCache.find(originalPath);
     if (it != g_redirectCache.end()) {
@@ -96,21 +116,21 @@ const char *RepogonVFSRedirectPath(const char *originalPath) {
     // 2. Check active mod directories for the requested asset
     for (const auto &mDir : g_modDirs) {
         std::string cand1 = mDir + "/resources/" + rel;
-        if (access(cand1.c_str(), F_OK) == 0) {
+        if (CheckFileExists(cand1)) {
             g_redirectCache[originalPath] = cand1;
             RepogonLog(@"[VFS] Redirected Asset: %s -> %s", originalPath, cand1.c_str());
             return g_redirectCache[originalPath].c_str();
         }
 
         std::string cand2 = mDir + "/content/" + rel;
-        if (access(cand2.c_str(), F_OK) == 0) {
+        if (CheckFileExists(cand2)) {
             g_redirectCache[originalPath] = cand2;
             RepogonLog(@"[VFS] Redirected Content: %s -> %s", originalPath, cand2.c_str());
             return g_redirectCache[originalPath].c_str();
         }
 
         std::string cand3 = mDir + "/" + rel;
-        if (access(cand3.c_str(), F_OK) == 0) {
+        if (CheckFileExists(cand3)) {
             g_redirectCache[originalPath] = cand3;
             RepogonLog(@"[VFS] Redirected Root: %s -> %s", originalPath, cand3.c_str());
             return g_redirectCache[originalPath].c_str();
@@ -123,6 +143,16 @@ const char *RepogonVFSRedirectPath(const char *originalPath) {
 }
 
 static int repogon_open(const char *path, int oflag, ...) {
+    if (t_inVfs) {
+        if (oflag & O_CREAT) {
+            va_list args;
+            va_start(args, oflag);
+            mode_t mode = static_cast<mode_t>(va_arg(args, int));
+            va_end(args);
+            return orig_open ? orig_open(path, oflag, mode) : open(path, oflag, mode);
+        }
+        return orig_open ? orig_open(path, oflag) : open(path, oflag);
+    }
     const char *target = RepogonVFSRedirectPath(path);
     if (!target) target = path;
 
@@ -137,12 +167,20 @@ static int repogon_open(const char *path, int oflag, ...) {
 }
 
 static FILE *repogon_fopen(const char *path, const char *mode) {
+    if (t_inVfs) {
+        return orig_fopen ? orig_fopen(path, mode) : fopen(path, mode);
+    }
     const char *target = RepogonVFSRedirectPath(path);
     if (!target) target = path;
     return orig_fopen ? orig_fopen(target, mode) : fopen(target, mode);
 }
 
 static int repogon_stat(const char *path, struct stat *buf) {
+    if (t_inVfs) {
+        if (orig_stat) return orig_stat(path, buf);
+        if (orig_stat64) return orig_stat64(path, buf);
+        return stat(path, buf);
+    }
     const char *target = RepogonVFSRedirectPath(path);
     if (!target) target = path;
     if (orig_stat) return orig_stat(target, buf);
@@ -151,6 +189,11 @@ static int repogon_stat(const char *path, struct stat *buf) {
 }
 
 static int repogon_lstat(const char *path, struct stat *buf) {
+    if (t_inVfs) {
+        if (orig_lstat) return orig_lstat(path, buf);
+        if (orig_lstat64) return orig_lstat64(path, buf);
+        return lstat(path, buf);
+    }
     const char *target = RepogonVFSRedirectPath(path);
     if (!target) target = path;
     if (orig_lstat) return orig_lstat(target, buf);
@@ -159,6 +202,9 @@ static int repogon_lstat(const char *path, struct stat *buf) {
 }
 
 static int repogon_access(const char *path, int amode) {
+    if (t_inVfs) {
+        return orig_access ? orig_access(path, amode) : access(path, amode);
+    }
     const char *target = RepogonVFSRedirectPath(path);
     if (!target) target = path;
     return orig_access ? orig_access(target, amode) : access(target, amode);

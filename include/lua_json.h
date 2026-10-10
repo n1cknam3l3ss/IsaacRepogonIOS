@@ -1,7 +1,7 @@
 #pragma once
 
 static const char *kJsonLuaSource = R"RAW_JSON(
-package.preload["json"] = function(...)
+local function _init_json_module()
 -----------------------------------------------------------------------------
 -- JSON4Lua: JSON encoding / decoding support for the Lua language.
 -- json Module.
@@ -33,9 +33,9 @@ package.preload["json"] = function(...)
 -----------------------------------------------------------------------------
 -- Imports and dependencies
 -----------------------------------------------------------------------------
-local math = require('math')
-local string = require("string")
-local table = require("table")
+local math = math
+local string = string
+local table = table
 
 -----------------------------------------------------------------------------
 -- Module declaration
@@ -428,6 +428,10 @@ function isEncodable(o)
 end
 
 return json
-return json
 end
+
+local _g_json = _init_json_module()
+package.preload["json"] = function(...) return _g_json end
+package.loaded["json"] = _g_json
+json = _g_json
 )RAW_JSON";
