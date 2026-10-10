@@ -301,6 +301,9 @@ static int Font_new(lua_State *L) {
     };
     lua_pushcfunction(L, getWidth); lua_setfield(L, -2, "GetStringWidth");
     lua_pushcfunction(L, getWidth); lua_setfield(L, -2, "GetStringWidthUTF8");
+
+    lua_pushcfunction(L, [](lua_State *st) -> int { return 0; });
+    lua_setfield(L, -2, "SetMissingCharacter");
     return 1;
 }
 
@@ -1170,6 +1173,8 @@ static int PushDummyItemEntry(lua_State *L) {
     lua_pushinteger(L, 0); lua_setfield(L, -2, "Type");
     lua_pushinteger(L, 0); lua_setfield(L, -2, "InitCharge");
     lua_pushinteger(L, 0); lua_setfield(L, -2, "MaxCharges");
+    lua_pushcfunction(L, [](lua_State *st) -> int { lua_pushboolean(st, 1); return 1; });
+    lua_setfield(L, -2, "IsAvailable");
     return 1;
 }
 
@@ -1643,6 +1648,19 @@ ItemPoolType = make_enum({ POOL_NULL = -1, POOL_TREASURE = 0 })
 RoomType = make_enum({ ROOM_NULL = 0, ROOM_DEFAULT = 1 })
 RoomShape = make_enum({ ROOMSHAPE_1x1 = 1 })
 DoorSlot = make_enum({ NO_DOOR_SLOT = -1 })
+DoorState = make_enum({
+    STATE_INIT = 0,
+    STATE_CLOSED = 1,
+    STATE_OPEN = 2,
+    STATE_ONE_CHAIN = 3,
+    STATE_WAITING_TO_CLOSE = 4,
+    STATE_CLOSING = 5,
+    STATE_DESTROYED = 6
+})
+EffectVariant = make_enum({
+    BLOOD_PARTICLE = 1,
+    BOMB_EXPLOSION = 2
+})
 Direction = make_enum({ NO_DIRECTION = -1 })
 ButtonAction = make_enum({ ACTION_NULL = -1 })
 Keyboard = make_enum({ KEY_NULL = 0 })
@@ -1848,9 +1866,22 @@ Vector = setmetatable({
 })
 
 local orig_Game = Game
-local game_inst = orig_Game()
-Game = setmetatable(game_inst, {
-    __call = function(_) return game_inst end
+Game = setmetatable({}, {
+    __call = function(_) return orig_Game() end,
+    __index = function(_, k)
+        local inst = orig_Game()
+        local v = inst[k]
+        if type(v) == "function" then
+            return function(self, ...)
+                if self == Game then
+                    return v(inst, ...)
+                else
+                    return v(self, ...)
+                end
+            end
+        end
+        return v
+    end
 })
 )RAW_POST";
     luaL_dostring(g_L, kPostInitScript);

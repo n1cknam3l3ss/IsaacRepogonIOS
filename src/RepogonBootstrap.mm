@@ -29,6 +29,7 @@ static uint32_t g_lastFrameCount = 0;
 @end
 
 static RepogonTickTarget *g_tickTarget = nil;
+static bool g_inRun = false;
 
 void RepogonTick(void) {
     uintptr_t game = RepogonGetGame();
@@ -53,6 +54,20 @@ void RepogonTick(void) {
     if (frameCount != g_lastFrameCount) {
         g_lastFrameCount = frameCount;
         RepogonLuaDispatchUpdate();
+    }
+
+    // In-run game lifecycle detection
+    uintptr_t player0 = RepogonGetPlayer(0);
+    if (player0 && room) {
+        if (!g_inRun) {
+            g_inRun = true;
+            RepogonLuaDispatchGameStarted(false);
+        }
+    } else {
+        if (g_inRun) {
+            g_inRun = false;
+            RepogonLuaDispatchGameExit(true);
+        }
     }
 
     // Render pass
@@ -91,10 +106,7 @@ void RepogonStart(void) {
         RepogonModManagerInit();
         RepogonModManagerScanAndLoadMods();
 
-        // 5. Notify mods of game start
-        RepogonLuaDispatchGameStarted(false);
-
-        // 6. Setup display link for 60fps frame tick
+        // 5. Setup display link for 60fps frame tick
         dispatch_async(dispatch_get_main_queue(), ^{
             g_tickTarget = [[RepogonTickTarget alloc] init];
             g_displayLink = [CADisplayLink displayLinkWithTarget:g_tickTarget selector:@selector(onFrameTick:)];
@@ -111,10 +123,16 @@ __attribute__((constructor)) static void RepogonConstructor(void) {
             NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
             [center addObserverForName:UIApplicationDidBecomeActiveNotification
                                 object:nil queue:NSOperationQueue.mainQueue
-                            usingBlock:^(__unused NSNotification *note) { RepogonStart(); }];
+                            usingBlock:^(__unused NSNotification *note) {
+                                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                                    RepogonStart();
+                                });
+                            }];
 
             if (UIApplication.sharedApplication.applicationState == UIApplicationStateActive) {
-                RepogonStart();
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                    RepogonStart();
+                });
             }
         });
     }
