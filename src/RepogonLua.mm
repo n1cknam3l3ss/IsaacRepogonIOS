@@ -2,6 +2,7 @@
 #import "RepogonEngine.h"
 #import "RepogonLogger.h"
 #import "RepogonOverlay.h"
+#import "RepogonXMLMerger.h"
 #import "lua_json.h"
 
 extern "C" {
@@ -1225,35 +1226,54 @@ static int Isaac_ConsoleOutput(lua_State *L) {
 
 static int Isaac_GetSoundIdByName(lua_State *L) {
     const char *name = luaL_optstring(L, 1, "");
-    int id = static_cast<int>(std::hash<std::string>{}(name) & 0x7FFF);
-    lua_pushinteger(L, id > 0 ? id : 1);
+    int id = RepogonGetSoundIdByName(name);
+    if (id < 0) {
+        id = static_cast<int>(std::hash<std::string>{}(name) & 0x7FFF);
+        if (id <= 0) id = 1;
+    }
+    lua_pushinteger(L, id);
     return 1;
 }
 
 static int Isaac_GetMusicIdByName(lua_State *L) {
     const char *name = luaL_optstring(L, 1, "");
-    int id = static_cast<int>(std::hash<std::string>{}(name) & 0x7FFF);
-    lua_pushinteger(L, id > 0 ? id : 1);
+    int id = RepogonGetMusicIdByName(name);
+    if (id < 0) {
+        id = static_cast<int>(std::hash<std::string>{}(name) & 0x7FFF);
+        if (id <= 0) id = 1;
+    }
+    lua_pushinteger(L, id);
     return 1;
 }
 
 static int Isaac_GetEntityVariantByName(lua_State *L) {
     const char *name = luaL_optstring(L, 1, "");
-    int id = static_cast<int>(std::hash<std::string>{}(name) & 0x7FFF);
-    lua_pushinteger(L, id > 0 ? id : 1);
+    int id = RepogonGetEntityVariantByName(name);
+    if (id < 0) {
+        id = static_cast<int>(std::hash<std::string>{}(name) & 0x7FFF);
+        if (id <= 0) id = 1;
+    }
+    lua_pushinteger(L, id);
     return 1;
 }
 
 static int Isaac_GetEntityTypeByName(lua_State *L) {
     const char *name = luaL_optstring(L, 1, "");
-    int id = static_cast<int>(std::hash<std::string>{}(name) & 0x7FFF);
-    lua_pushinteger(L, id > 0 ? id : 1);
+    int id = RepogonGetEntityTypeByName(name);
+    if (id < 0) {
+        id = static_cast<int>(std::hash<std::string>{}(name) & 0x7FFF);
+        if (id <= 0) id = 1;
+    }
+    lua_pushinteger(L, id);
     return 1;
 }
 
 static int Isaac_GetPlayerTypeByName(lua_State *L) {
     const char *name = luaL_optstring(L, 1, "");
-    int id = static_cast<int>((std::hash<std::string>{}(name) % 100) + 50);
+    int id = RepogonGetPlayerTypeByName(name);
+    if (id < 0) {
+        id = static_cast<int>((std::hash<std::string>{}(name) % 100) + 50);
+    }
     lua_pushinteger(L, id);
     return 1;
 }

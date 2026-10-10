@@ -126,23 +126,18 @@ void RepogonStart(void) {
 
 __attribute__((constructor)) static void RepogonConstructor(void) {
     @autoreleasepool {
-        RepogonLogInit();
-        RepogonVFSInit();
-        RepogonModManagerInit();
-        RepogonModManagerScanAssetsAndMergeXML();
-
         dispatch_async(dispatch_get_main_queue(), ^{
             NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
             [center addObserverForName:UIApplicationDidBecomeActiveNotification
                                 object:nil queue:NSOperationQueue.mainQueue
                             usingBlock:^(__unused NSNotification *note) {
-                                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                                     RepogonStart();
                                 });
                             }];
 
             if (UIApplication.sharedApplication.applicationState == UIApplicationStateActive) {
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                     RepogonStart();
                 });
             }

@@ -11,6 +11,13 @@ extern "C" {
 void RepogonXMLMergerProcessMods(const std::vector<std::string> &modDirs);
 const char *RepogonGetMergedXMLPath(const char *xmlFileName);
 
+int RepogonGetPlayerTypeByName(const char *name);
+int RepogonGetEntityVariantByName(const char *name);
+int RepogonGetEntityTypeByName(const char *name);
+int RepogonGetSoundIdByName(const char *name);
+int RepogonGetMusicIdByName(const char *name);
+
 #ifdef __cplusplus
 }
 #endif
+

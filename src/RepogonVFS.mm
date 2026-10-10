@@ -91,11 +91,13 @@ const char *RepogonVFSRedirectPath(const char *originalPath) {
 
     // 1. Check if this is an XML file that was merged dynamically (e.g. players.xml, entities2.xml)
     const char *baseName = GetBaseName(originalPath);
-    const char *mergedXml = RepogonGetMergedXMLPath(baseName);
-    if (mergedXml) {
-        g_redirectCache[originalPath] = mergedXml;
-        RepogonLog(@"[VFS] Redirected XML: %s -> %s", originalPath, mergedXml);
-        return g_redirectCache[originalPath].c_str();
+    if (strstr(baseName, ".xml") != nullptr) {
+        const char *mergedXml = RepogonGetMergedXMLPath(baseName);
+        if (mergedXml) {
+            g_redirectCache[originalPath] = mergedXml;
+            RepogonLog(@"[VFS] Redirected XML: %s -> %s", originalPath, mergedXml);
+            return g_redirectCache[originalPath].c_str();
+        }
     }
 
     // Look for resource directory marker in path
