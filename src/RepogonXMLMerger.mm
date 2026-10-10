@@ -177,17 +177,19 @@ void RepogonXMLMergerProcessMods(const std::vector<std::string> &modDirs) {
     NSFileManager *fm = [NSFileManager defaultManager];
     [fm createDirectoryAtPath:cacheDir withIntermediateDirectories:YES attributes:nil error:nil];
 
-    // Clean up any stale dangerous merged XML files that cause mobile engine bounds crash
+    // Clean up any stale dangerous merged XML files that cause mobile engine bounds crash or audio hang
     [fm removeItemAtPath:[cacheDir stringByAppendingPathComponent:@"players.xml"] error:nil];
     [fm removeItemAtPath:[cacheDir stringByAppendingPathComponent:@"entities2.xml"] error:nil];
     [fm removeItemAtPath:[cacheDir stringByAppendingPathComponent:@"items.xml"] error:nil];
     [fm removeItemAtPath:[cacheDir stringByAppendingPathComponent:@"costumes2.xml"] error:nil];
+    [fm removeItemAtPath:[cacheDir stringByAppendingPathComponent:@"music.xml"] error:nil];
+    [fm removeItemAtPath:[cacheDir stringByAppendingPathComponent:@"sounds.xml"] error:nil];
 
     int customPlayerId = 41;
     int customSoundId = 1001;
     int customMusicId = 101;
 
-    // Scan mods in-memory for custom player types and entity variants without altering base XML files
+    // Scan mods in-memory for custom player types, entity variants, music tracks, and sounds
     for (const auto &mDir : modDirs) {
         NSString *modPath = [NSString stringWithUTF8String:mDir.c_str()];
 
@@ -257,104 +259,60 @@ void RepogonXMLMergerProcessMods(const std::vector<std::string> &modDirs) {
                 break;
             }
         }
-    }
 
-    // Only merge dynamically expandable XMLs (music and sounds)
-    struct XMLTarget {
-        const char *fileName;
-        const char *rootTag;
-    };
-
-    XMLTarget targets[] = {
-        {"music.xml", "music"},
-        {"sounds.xml", "sounds"}
-    };
-
-    for (const auto &target : targets) {
-        NSString *targetFile = [NSString stringWithUTF8String:target.fileName];
-        NSString *rootTag = [NSString stringWithUTF8String:target.rootTag];
-
-        std::vector<std::string> contributingMods;
-        NSMutableString *injectedXml = [NSMutableString string];
-
-        for (const auto &mDir : modDirs) {
-            NSString *modPath = [NSString stringWithUTF8String:mDir.c_str()];
-            NSArray *modCandidates = @[
-                [modPath stringByAppendingPathComponent:[NSString stringWithFormat:@"content/%@", targetFile]],
-                [modPath stringByAppendingPathComponent:[NSString stringWithFormat:@"resources/%@", targetFile]],
-                [modPath stringByAppendingPathComponent:targetFile]
-            ];
-
-            for (NSString *candidate in modCandidates) {
-                if ([fm fileExistsAtPath:candidate]) {
-                    NSString *content = [NSString stringWithContentsOfFile:candidate encoding:NSUTF8StringEncoding error:nil];
-                    if (content) {
-                        NSString *inner = ExtractRootContent(content, rootTag);
-                        if (inner.length > 0) {
-                            [injectedXml appendFormat:@"\n<!-- Injected from Mod: %@ -->\n%@\n", modPath.lastPathComponent, inner];
-                            contributingMods.push_back(mDir);
-                            break;
+        // 3. In-memory music registration
+        NSArray *mCands = @[
+            [modPath stringByAppendingPathComponent:@"content/music.xml"],
+            [modPath stringByAppendingPathComponent:@"resources/music.xml"],
+            [modPath stringByAppendingPathComponent:@"music.xml"]
+        ];
+        for (NSString *cand in mCands) {
+            if ([fm fileExistsAtPath:cand]) {
+                NSString *content = [NSString stringWithContentsOfFile:cand encoding:NSUTF8StringEncoding error:nil];
+                if (content) {
+                    NSRegularExpression *musRegex = [NSRegularExpression regularExpressionWithPattern:@"<track\\b[^>]*\\bname=\"([^\"]+)\"" options:NSRegularExpressionCaseInsensitive error:nil];
+                    NSArray *musMatches = [musRegex matchesInString:content options:0 range:NSMakeRange(0, content.length)];
+                    for (NSTextCheckingResult *m in musMatches) {
+                        if (m.numberOfRanges > 1) {
+                            NSString *mName = [content substringWithRange:[m rangeAtIndex:1]];
+                            std::string lowerMName = [mName.lowercaseString UTF8String];
+                            if (g_musicMap.find(lowerMName) == g_musicMap.end()) {
+                                g_musicMap[lowerMName] = customMusicId++;
+                                RepogonLog(@"[XMLMerger] Registered Custom Music (in-memory): %@ -> %d", mName, g_musicMap[lowerMName]);
+                            }
                         }
                     }
                 }
+                break;
             }
         }
 
-        if (contributingMods.empty()) {
-            continue; // No mods modified this XML
-        }
-
-        // Register custom sound IDs
-        if ([targetFile isEqualToString:@"sounds.xml"]) {
-            NSRegularExpression *sndRegex = [NSRegularExpression regularExpressionWithPattern:@"<sound\\b[^>]*\\bname=\"([^\"]+)\"" options:NSRegularExpressionCaseInsensitive error:nil];
-            NSArray *sndMatches = [sndRegex matchesInString:injectedXml options:0 range:NSMakeRange(0, injectedXml.length)];
-            for (NSTextCheckingResult *m in sndMatches) {
-                if (m.numberOfRanges > 1) {
-                    NSString *sName = [injectedXml substringWithRange:[m rangeAtIndex:1]];
-                    std::string lowerSName = [sName.lowercaseString UTF8String];
-                    if (g_soundMap.find(lowerSName) == g_soundMap.end()) {
-                        g_soundMap[lowerSName] = customSoundId++;
-                        RepogonLog(@"[XMLMerger] Registered Custom Sound: %@ -> %d", sName, g_soundMap[lowerSName]);
+        // 4. In-memory sounds registration
+        NSArray *sCands = @[
+            [modPath stringByAppendingPathComponent:@"content/sounds.xml"],
+            [modPath stringByAppendingPathComponent:@"resources/sounds.xml"],
+            [modPath stringByAppendingPathComponent:@"sounds.xml"]
+        ];
+        for (NSString *cand in sCands) {
+            if ([fm fileExistsAtPath:cand]) {
+                NSString *content = [NSString stringWithContentsOfFile:cand encoding:NSUTF8StringEncoding error:nil];
+                if (content) {
+                    NSRegularExpression *sndRegex = [NSRegularExpression regularExpressionWithPattern:@"<sound\\b[^>]*\\bname=\"([^\"]+)\"" options:NSRegularExpressionCaseInsensitive error:nil];
+                    NSArray *sndMatches = [sndRegex matchesInString:content options:0 range:NSMakeRange(0, content.length)];
+                    for (NSTextCheckingResult *m in sndMatches) {
+                        if (m.numberOfRanges > 1) {
+                            NSString *sName = [content substringWithRange:[m rangeAtIndex:1]];
+                            std::string lowerSName = [sName.lowercaseString UTF8String];
+                            if (g_soundMap.find(lowerSName) == g_soundMap.end()) {
+                                g_soundMap[lowerSName] = customSoundId++;
+                                RepogonLog(@"[XMLMerger] Registered Custom Sound (in-memory): %@ -> %d", sName, g_soundMap[lowerSName]);
+                            }
+                        }
                     }
                 }
-            }
-        } else if ([targetFile isEqualToString:@"music.xml"]) {
-            NSRegularExpression *musRegex = [NSRegularExpression regularExpressionWithPattern:@"<track\\b[^>]*\\bname=\"([^\"]+)\"" options:NSRegularExpressionCaseInsensitive error:nil];
-            NSArray *musMatches = [musRegex matchesInString:injectedXml options:0 range:NSMakeRange(0, injectedXml.length)];
-            for (NSTextCheckingResult *m in musMatches) {
-                if (m.numberOfRanges > 1) {
-                    NSString *mName = [injectedXml substringWithRange:[m rangeAtIndex:1]];
-                    std::string lowerMName = [mName.lowercaseString UTF8String];
-                    if (g_musicMap.find(lowerMName) == g_musicMap.end()) {
-                        g_musicMap[lowerMName] = customMusicId++;
-                        RepogonLog(@"[XMLMerger] Registered Custom Music: %@ -> %d", mName, g_musicMap[lowerMName]);
-                    }
-                }
+                break;
             }
         }
-
-        NSString *baseXmlPath = FindBaseXML(targetFile);
-        if (!baseXmlPath) {
-            RepogonLog(@"[XMLMerger] Warning: Base XML not found for %@", targetFile);
-            continue;
-        }
-
-        NSString *baseContent = [NSString stringWithContentsOfFile:baseXmlPath encoding:NSUTF8StringEncoding error:nil];
-        if (!baseContent) continue;
-
-        NSString *closeTag = [NSString stringWithFormat:@"</%@>", rootTag];
-        NSRange closeRange = [baseContent rangeOfString:closeTag options:NSBackwardsSearch | NSCaseInsensitiveSearch];
-        if (closeRange.location == NSNotFound) continue;
-
-        NSMutableString *merged = [baseContent mutableCopy];
-        [merged insertString:injectedXml atIndex:closeRange.location];
-
-        NSString *destPath = [cacheDir stringByAppendingPathComponent:targetFile];
-        [merged writeToFile:destPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
-
-        g_mergedPaths[target.fileName] = [destPath UTF8String];
-        RepogonLog(@"[XMLMerger] Successfully merged %@ with %zu mods -> %@",
-                   targetFile, contributingMods.size(), destPath);
     }
 }
 

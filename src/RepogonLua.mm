@@ -565,6 +565,8 @@ static int Player_index(lua_State *L) {
             lua_pushnumber(L, RepogonPlayerGetDamage(player)); return 1;
         } else if (strcmp(key, "MoveSpeed") == 0) {
             lua_pushnumber(L, RepogonPlayerGetMoveSpeed(player)); return 1;
+        } else if (strcmp(key, "ControllerIndex") == 0) {
+            lua_pushinteger(L, 0); return 1;
         }
     }
 
@@ -726,6 +728,17 @@ static int Player_HasCollectible(lua_State *L) {
     return 1;
 }
 
+static int Player_GetOtherTwin(lua_State *L) { lua_pushnil(L); return 1; }
+static int Player_GetSmeltedTrinkets(lua_State *L) { lua_newtable(L); return 1; }
+static int Player_GetBagOfCraftingContent(lua_State *L) { lua_newtable(L); return 1; }
+static int Player_GetGlyphOfBalanceDrop(lua_State *L) {
+    lua_newtable(L);
+    lua_pushinteger(L, -1); lua_rawseti(L, -2, 1);
+    lua_pushinteger(L, 0); lua_rawseti(L, -2, 2);
+    return 1;
+}
+static int Player_GetSubPlayer(lua_State *L) { lua_pushnil(L); return 1; }
+
 static int PushDummyRNG(lua_State *L) {
     lua_newtable(L);
     lua_pushcfunction(L, [](lua_State *st) -> int { return 0; }); lua_setfield(L, -2, "SetSeed");
@@ -827,7 +840,16 @@ static int Room_HasLava(lua_State *L) { lua_pushboolean(L, 0); return 1; }
 static int Room_GetFrameCount(lua_State *L) { lua_pushinteger(L, 0); return 1; }
 static int Room_GetRandomPosition(lua_State *L) { PushVector(L, 320.0f, 240.0f); return 1; }
 static int Room_IsMirrorWorld(lua_State *L) { lua_pushboolean(L, 0); return 1; }
-static int Room_GetDoor(lua_State *L) { lua_pushnil(L); return 1; }
+static int Room_GetDoor(lua_State *L) {
+    lua_newtable(L);
+    lua_pushinteger(L, 0); lua_setfield(L, -2, "State");
+    lua_pushcfunction(L, [](lua_State *st) -> int { lua_pushboolean(st, 0); return 1; }); lua_setfield(L, -2, "IsOpen");
+    lua_pushcfunction(L, [](lua_State *st) -> int { lua_pushboolean(st, 0); return 1; }); lua_setfield(L, -2, "IsLocked");
+    lua_pushcfunction(L, [](lua_State *st) -> int { lua_pushboolean(st, 0); return 1; }); lua_setfield(L, -2, "CanBlowUp");
+    lua_pushcfunction(L, [](lua_State *st) -> int { return 0; }); lua_setfield(L, -2, "Open");
+    lua_pushcfunction(L, [](lua_State *st) -> int { return 0; }); lua_setfield(L, -2, "Close");
+    return 1;
+}
 static int Room_RemoveDoor(lua_State *L) { return 0; }
 static int Room_FindFreeTilePosition(lua_State *L) { PushVector(L, 320.0f, 240.0f); return 1; }
 static int Room_GetGridWidth(lua_State *L) { lua_pushinteger(L, 13); return 1; }
@@ -842,6 +864,9 @@ static int Room_IsCurrentRoomLastBoss(lua_State *L) { lua_pushboolean(L, 0); ret
 static int Room_GetRoomConfigStage(lua_State *L) { lua_pushinteger(L, 1); return 1; }
 static int Room_IsAmbushActive(lua_State *L) { lua_pushboolean(L, 0); return 1; }
 static int Room_IsAmbushDone(lua_State *L) { lua_pushboolean(L, 1); return 1; }
+static int Room_HasCurseMist(lua_State *L) { lua_pushboolean(L, 0); return 1; }
+static int Room_GetBossID(lua_State *L) { lua_pushinteger(L, 0); return 1; }
+static int Room_GetRoomShape(lua_State *L) { lua_pushinteger(L, 1); return 1; }
 
 void PushRoom(lua_State *L, uintptr_t room) {
     lua_newtable(L);
@@ -965,6 +990,7 @@ static void PushRoomDesc(lua_State *L, int gridIndex = 0) {
     lua_newtable(L);
     lua_pushinteger(L, gridIndex); lua_setfield(L, -2, "SafeGridIndex");
     lua_pushinteger(L, gridIndex); lua_setfield(L, -2, "GridIndex");
+    lua_pushinteger(L, gridIndex); lua_setfield(L, -2, "ListIndex");
     lua_pushinteger(L, static_cast<lua_Integer>(0x100000 + gridIndex)); lua_setfield(L, -2, "__ptr");
     lua_pushinteger(L, 1); lua_setfield(L, -2, "VisitedCount");
     lua_pushinteger(L, 0); lua_setfield(L, -2, "Flags");
@@ -974,8 +1000,17 @@ static void PushRoomDesc(lua_State *L, int gridIndex = 0) {
     lua_pushinteger(L, 1); lua_setfield(L, -2, "Type");
     lua_pushinteger(L, 1); lua_setfield(L, -2, "Shape");
     lua_pushinteger(L, 0); lua_setfield(L, -2, "Subtype");
+    lua_pushinteger(L, 0); lua_setfield(L, -2, "Variant");
     lua_pushstring(L, "Room"); lua_setfield(L, -2, "Name");
     lua_setfield(L, -2, "Data");
+
+    lua_pushcfunction(L, [](lua_State *st) -> int {
+        lua_newtable(st);
+        lua_pushcfunction(st, [](lua_State *s2) -> int { lua_pushnil(s2); return 1; });
+        lua_setfield(st, -2, "Get");
+        return 1;
+    });
+    lua_setfield(L, -2, "GetEntitiesSaveState");
 }
 
 static int Level_GetStage(lua_State *L) {
@@ -1063,6 +1098,8 @@ static int Level_IsPreAscent(lua_State *L) {
 
 static int Level_UncoverHiddenDoor(lua_State *L) { return 0; }
 static int Level_MakeRedRoomDoor(lua_State *L) { return 0; }
+static int Level_GetStateFlag(lua_State *L) { lua_pushboolean(L, 0); return 1; }
+static int Level_GetCanSeeEverything(lua_State *L) { lua_pushboolean(L, 0); return 1; }
 
 void PushLevel(lua_State *L) {
     lua_newtable(L);
@@ -1312,7 +1349,9 @@ static int Isaac_GetTime(lua_State *L) {
 }
 
 static int Isaac_IsInGame(lua_State *L) {
-    lua_pushboolean(L, 1);
+    uintptr_t p = RepogonGetPlayer(0);
+    uintptr_t r = RepogonGetRoom();
+    lua_pushboolean(L, (p != 0 && r != 0) ? 1 : 0);
     return 1;
 }
 
@@ -2087,6 +2126,14 @@ MainMenuType = make_enum({ COLLECTION = 1 })
 MenuManager = {
     GetActiveMenu = function() return -1 end
 }
+Achievement = make_enum({})
+EventCounter = make_enum({})
+LevelStateFlag = make_enum({})
+PoopSpellType = make_enum({})
+CollectionMenu = {
+    GetSelectedPage = function() return 0 end,
+    GetSelectedElement = function() return 0 end
+}
 )RAW_INIT";
 
     int initErr = luaL_dostring(g_L, kInitScript);
@@ -2248,6 +2295,8 @@ Game = setmetatable({}, {
     lua_pushcfunction(g_L, Player_GetZodiacEffect); lua_setfield(g_L, -2, "GetZodiacEffect");
     lua_pushcfunction(g_L, Player_GetModelingClayEffect); lua_setfield(g_L, -2, "GetModelingClayEffect");
     lua_pushcfunction(g_L, Player_GetGlyphOfBalanceDrop); lua_setfield(g_L, -2, "GetGlyphOfBalanceDrop");
+    lua_pushcfunction(g_L, Player_GetBagOfCraftingContent); lua_setfield(g_L, -2, "GetBagOfCraftingContent");
+    lua_pushcfunction(g_L, Player_GetSubPlayer); lua_setfield(g_L, -2, "GetSubPlayer");
     lua_pushcfunction(g_L, Entity_GetSprite); lua_setfield(g_L, -2, "GetSprite");
     lua_pushcfunction(g_L, Player_isMainPlayer); lua_setfield(g_L, -2, "isMainPlayer");
     lua_pop(g_L, 1);
@@ -2288,6 +2337,9 @@ Game = setmetatable({}, {
     lua_pushcfunction(g_L, Room_GetRoomConfigStage); lua_setfield(g_L, -2, "GetRoomConfigStage");
     lua_pushcfunction(g_L, Room_IsAmbushActive); lua_setfield(g_L, -2, "IsAmbushActive");
     lua_pushcfunction(g_L, Room_IsAmbushDone); lua_setfield(g_L, -2, "IsAmbushDone");
+    lua_pushcfunction(g_L, Room_HasCurseMist); lua_setfield(g_L, -2, "HasCurseMist");
+    lua_pushcfunction(g_L, Room_GetBossID); lua_setfield(g_L, -2, "GetBossID");
+    lua_pushcfunction(g_L, Room_GetRoomShape); lua_setfield(g_L, -2, "GetRoomShape");
     lua_pushvalue(g_L, -1); lua_setfield(g_L, -2, "__index");
     lua_pop(g_L, 1);
 
@@ -2326,6 +2378,8 @@ Game = setmetatable({}, {
     lua_pushcfunction(g_L, Level_IsPreAscent); lua_setfield(g_L, -2, "IsPreAscent");
     lua_pushcfunction(g_L, Level_UncoverHiddenDoor); lua_setfield(g_L, -2, "UncoverHiddenDoor");
     lua_pushcfunction(g_L, Level_MakeRedRoomDoor); lua_setfield(g_L, -2, "MakeRedRoomDoor");
+    lua_pushcfunction(g_L, Level_GetStateFlag); lua_setfield(g_L, -2, "GetStateFlag");
+    lua_pushcfunction(g_L, Level_GetCanSeeEverything); lua_setfield(g_L, -2, "GetCanSeeEverything");
     lua_pushvalue(g_L, -1); lua_setfield(g_L, -2, "__index");
     lua_pop(g_L, 1);
 
@@ -2532,7 +2586,12 @@ static void DispatchCallback(int callbackId, std::function<void(lua_State*)> pus
         int err = lua_pcall(g_L, argCount, 1, 0);
         if (err != LUA_OK) {
             const char *msg = lua_tostring(g_L, -1);
-            RepogonLog(@"Callback Error [%s] (id: %d): %s", entry.modName.c_str(), callbackId, msg ? msg : "unknown");
+            static std::unordered_map<std::string, int> s_errorCounts;
+            std::string errKey = entry.modName + ":" + std::to_string(callbackId) + ":" + (msg ? msg : "");
+            int count = ++s_errorCounts[errKey];
+            if (count <= 3) {
+                RepogonLog(@"Callback Error [%s] (id: %d): %s%s", entry.modName.c_str(), callbackId, msg ? msg : "unknown", (count == 3 ? " (suppressing further identical errors)" : ""));
+            }
             lua_pop(g_L, 1);
         } else {
             lua_pop(g_L, 1); // Discard return value

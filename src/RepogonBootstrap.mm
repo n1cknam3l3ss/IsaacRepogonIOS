@@ -37,9 +37,38 @@ void RepogonTick(void) {
     uintptr_t game = RepogonGetGame();
     if (!game) return;
 
-    // Room transition detection
     uintptr_t room = RepogonGetRoom();
-    if (room && room != g_lastRoom) {
+    uintptr_t player0 = RepogonGetPlayer(0);
+
+    // In-run game lifecycle detection
+    if (player0 && room) {
+        g_noPlayerFrames = 0;
+        if (!g_inRun) {
+            g_inRun = true;
+            g_lastRoom = room;
+            g_lastStage = RepogonGameGetStage();
+            g_lastFrameCount = RepogonGameGetFrameCount();
+            RepogonLuaDispatchGameStarted(false);
+            RepogonLuaDispatchNewRoom();
+            RepogonLuaDispatchNewLevel();
+        }
+    } else if (!room || !player0) {
+        if (g_inRun) {
+            g_noPlayerFrames++;
+            if (g_noPlayerFrames > 90) { // 1.5s of consecutive null room/player
+                g_inRun = false;
+                RepogonLuaDispatchGameExit(true);
+                g_lastRoom = 0;
+                g_lastStage = -1;
+            }
+        }
+        return; // Don't dispatch in-game callbacks when not in a valid run
+    }
+
+    if (!g_inRun) return;
+
+    // Room transition detection
+    if (room != g_lastRoom) {
         g_lastRoom = room;
         RepogonLuaDispatchNewRoom();
     }
@@ -56,26 +85,6 @@ void RepogonTick(void) {
     if (frameCount != g_lastFrameCount) {
         g_lastFrameCount = frameCount;
         RepogonLuaDispatchUpdate();
-    }
-
-    // In-run game lifecycle detection
-    uintptr_t player0 = RepogonGetPlayer(0);
-    if (player0 && room) {
-        g_noPlayerFrames = 0;
-        if (!g_inRun) {
-            g_inRun = true;
-            RepogonLuaDispatchGameStarted(false);
-        }
-    } else if (!room) {
-        if (g_inRun) {
-            g_noPlayerFrames++;
-            if (g_noPlayerFrames > 90) { // 1.5s of consecutive null room
-                g_inRun = false;
-                RepogonLuaDispatchGameExit(true);
-                g_lastRoom = 0;
-                g_lastStage = -1;
-            }
-        }
     }
 
     // Render pass
