@@ -37,13 +37,22 @@ struct TextDrawCommand {
         UIFont *font = [UIFont fontWithName:@"Courier-Bold" size:fontSize];
         if (!font) font = [UIFont monospacedSystemFontOfSize:fontSize weight:UIFontWeightBold];
 
+        CGPoint pt = CGPointMake(cmd.x, cmd.y);
+
+        // 1px black outline / drop shadow for crisp readability on any floor
+        UIColor *shadowColor = [UIColor colorWithWhite:0.0f alpha:MIN(cmd.a, 0.85f)];
+        NSDictionary *shadowAttrs = @{
+            NSFontAttributeName: font,
+            NSForegroundColorAttributeName: shadowColor
+        };
+        [cmd.text drawAtPoint:CGPointMake(pt.x + 1.0f, pt.y + 1.0f) withAttributes:shadowAttrs];
+
         UIColor *color = [UIColor colorWithRed:cmd.r green:cmd.g blue:cmd.b alpha:cmd.a];
         NSDictionary *attrs = @{
             NSFontAttributeName: font,
             NSForegroundColorAttributeName: color
         };
 
-        CGPoint pt = CGPointMake(cmd.x, cmd.y);
         [cmd.text drawAtPoint:pt withAttributes:attrs];
     }
 }

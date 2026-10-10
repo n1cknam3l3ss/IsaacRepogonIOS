@@ -124,6 +124,17 @@ void RepogonModManagerScanAndLoadMods(void) {
             continue;
         }
 
+        // Auto-patch PlanetariumChance to prevent it disabling itself under iOS REPENTOGON
+        if ([item isEqualToString:@"PlanetariumChance"] || [mainLuaPath containsString:@"PlanetariumChance"]) {
+            NSString *src = [NSString stringWithContentsOfFile:mainLuaPath encoding:NSUTF8StringEncoding error:nil];
+            if (src && [src containsString:@"self.storage.repentogonEnabled = true"]) {
+                src = [src stringByReplacingOccurrencesOfString:@"self.storage.repentogonEnabled = true"
+                                                     withString:@"self.storage.repentogonEnabled = false -- auto-patched for iOS"];
+                [src writeToFile:mainLuaPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+                RepogonLog(@"Auto-patched PlanetariumChance to remain enabled under iOS REPENTOGON.");
+            }
+        }
+
         RepogonLog(@"Loading mod [%@] from: %@", item, mainLuaPath);
 
         // Update package.path for this mod

@@ -68,6 +68,7 @@ static std::unordered_map<uintptr_t, int> g_entityDataRefs;
 
 // Forward Declarations
 void PushEntity(lua_State *L, uintptr_t ent);
+void PushPickup(lua_State *L, uintptr_t pickup);
 void PushPlayer(lua_State *L, uintptr_t player);
 void PushRoom(lua_State *L, uintptr_t room);
 void PushGame(lua_State *L, uintptr_t game);
@@ -265,6 +266,31 @@ static int KColor_new(lua_State *L) {
 
 #pragma mark - Stubs for Font and Sprite
 
+static void ExtractColorFromLua(lua_State *st, int idx, float &r, float &g, float &b, float &a) {
+    r = 1.0f; g = 1.0f; b = 1.0f; a = 1.0f;
+    if (lua_istable(st, idx)) {
+        lua_getfield(st, idx, "Red");
+        if (lua_isnil(st, -1)) { lua_pop(st, 1); lua_getfield(st, idx, "R"); }
+        if (!lua_isnil(st, -1)) r = static_cast<float>(lua_tonumber(st, -1));
+        lua_pop(st, 1);
+
+        lua_getfield(st, idx, "Green");
+        if (lua_isnil(st, -1)) { lua_pop(st, 1); lua_getfield(st, idx, "G"); }
+        if (!lua_isnil(st, -1)) g = static_cast<float>(lua_tonumber(st, -1));
+        lua_pop(st, 1);
+
+        lua_getfield(st, idx, "Blue");
+        if (lua_isnil(st, -1)) { lua_pop(st, 1); lua_getfield(st, idx, "B"); }
+        if (!lua_isnil(st, -1)) b = static_cast<float>(lua_tonumber(st, -1));
+        lua_pop(st, 1);
+
+        lua_getfield(st, idx, "Alpha");
+        if (lua_isnil(st, -1)) { lua_pop(st, 1); lua_getfield(st, idx, "A"); }
+        if (!lua_isnil(st, -1)) a = static_cast<float>(lua_tonumber(st, -1));
+        lua_pop(st, 1);
+    }
+}
+
 static int Font_new(lua_State *L) {
     lua_newtable(L);
     // Method stubs
@@ -279,7 +305,9 @@ static int Font_new(lua_State *L) {
         const char *txt = luaL_optstring(st, 2, "");
         float x = static_cast<float>(luaL_optnumber(st, 3, 0));
         float y = static_cast<float>(luaL_optnumber(st, 4, 0));
-        RepogonOverlayAddText([NSString stringWithUTF8String:txt], x, y, 1.0f, 1.0f, 1.0f, 1.0f);
+        float r = 1.0f, g = 1.0f, b = 1.0f, a = 1.0f;
+        ExtractColorFromLua(st, 5, r, g, b, a);
+        RepogonOverlayAddText([NSString stringWithUTF8String:txt], x, y, r, g, b, a);
         return 0;
     };
     lua_pushcfunction(L, drawStr); lua_setfield(L, -2, "DrawString");
@@ -287,11 +315,13 @@ static int Font_new(lua_State *L) {
 
     auto drawScaled = [](lua_State *st) -> int {
         const char *txt = luaL_optstring(st, 2, "");
-        float sx = static_cast<float>(luaL_optnumber(st, 5, 1.0));
-        float sy = static_cast<float>(luaL_optnumber(st, 6, 1.0));
         float x = static_cast<float>(luaL_optnumber(st, 3, 0));
         float y = static_cast<float>(luaL_optnumber(st, 4, 0));
-        RepogonOverlayAddScaledText([NSString stringWithUTF8String:txt], x, y, sx, sy, 1.0f, 1.0f, 1.0f, 1.0f);
+        float sx = static_cast<float>(luaL_optnumber(st, 5, 1.0));
+        float sy = static_cast<float>(luaL_optnumber(st, 6, 1.0));
+        float r = 1.0f, g = 1.0f, b = 1.0f, a = 1.0f;
+        ExtractColorFromLua(st, 7, r, g, b, a);
+        RepogonOverlayAddScaledText([NSString stringWithUTF8String:txt], x, y, sx, sy, r, g, b, a);
         return 0;
     };
     lua_pushcfunction(L, drawScaled); lua_setfield(L, -2, "DrawStringScaled");
@@ -316,13 +346,33 @@ static int Sprite_new(lua_State *L) {
     lua_setfield(L, -2, "Scale");
 
     auto dummyFunc = [](lua_State *st) -> int { return 0; };
-    lua_pushcfunction(L, dummyFunc); lua_setfield(L, -2, "Load");
+    lua_pushcfunction(L, [](lua_State *st) -> int {
+        const char *fn = luaL_optstring(st, 2, "");
+        lua_pushstring(st, fn);
+        lua_setfield(st, 1, "__anm2");
+        lua_pushboolean(st, 1);
+        return 1;
+    }); lua_setfield(L, -2, "Load");
     lua_pushcfunction(L, dummyFunc); lua_setfield(L, -2, "Play");
     lua_pushcfunction(L, dummyFunc); lua_setfield(L, -2, "SetFrame");
     lua_pushcfunction(L, dummyFunc); lua_setfield(L, -2, "SetLastFrame");
     lua_pushcfunction(L, dummyFunc); lua_setfield(L, -2, "SetAnimation");
     lua_pushcfunction(L, dummyFunc); lua_setfield(L, -2, "Update");
-    lua_pushcfunction(L, dummyFunc); lua_setfield(L, -2, "Render");
+    lua_pushcfunction(L, [](lua_State *st) -> int {
+        Vector2f pos = {0.0f, 0.0f};
+        if (lua_istable(st, 2) || lua_isuserdata(st, 2)) {
+            pos = CheckVector(st, 2);
+        }
+        lua_getfield(st, 1, "__anm2");
+        if (lua_isstring(st, -1)) {
+            const char *anm = lua_tostring(st, -1);
+            if (strstr(anm, "hudstats") || strstr(anm, "planetarium")) {
+                RepogonOverlayAddScaledText(@"[P]", pos.x, pos.y, 1.0f, 1.0f, 0.4f, 0.7f, 1.0f, 0.85f);
+            }
+        }
+        lua_pop(st, 1);
+        return 0;
+    }); lua_setfield(L, -2, "Render");
     lua_pushcfunction(L, dummyFunc); lua_setfield(L, -2, "RenderLayer");
     lua_pushcfunction(L, dummyFunc); lua_setfield(L, -2, "ReplaceSpritesheet");
     lua_pushcfunction(L, dummyFunc); lua_setfield(L, -2, "LoadGraphics");
@@ -345,6 +395,10 @@ static int Sprite_new(lua_State *L) {
 #pragma mark - Entity Metatable
 
 static uintptr_t CheckEntityPtr(lua_State *L, int index) {
+    if (lua_isuserdata(L, index)) {
+        uintptr_t *ud = reinterpret_cast<uintptr_t *>(lua_touserdata(L, index));
+        return ud ? *ud : 0;
+    }
     if (lua_istable(L, index)) {
         lua_getfield(L, index, "__ptr");
         uintptr_t ptr = static_cast<uintptr_t>(lua_tointeger(L, -1));
@@ -384,9 +438,24 @@ static int Entity_index(lua_State *L) {
     } else if (strcmp(key, "MaxHitPoints") == 0) {
         lua_pushnumber(L, RepogonEntityGetMaxHP(ent)); return 1;
     } else if (strcmp(key, "FrameCount") == 0) {
-        lua_pushinteger(L, 0); return 1;
+        uint32_t fc = RepogonGameGetFrameCount();
+        lua_pushinteger(L, fc > 0 ? fc : 100); return 1;
     } else if (strcmp(key, "Index") == 0) {
+        lua_pushinteger(L, static_cast<lua_Integer>(ent & 0xFFFF)); return 1;
+    } else if (strcmp(key, "InitSeed") == 0) {
+        lua_pushinteger(L, static_cast<lua_Integer>((ent ^ 0xDEADBEEF) & 0x7FFFFFFF)); return 1;
+    } else if (strcmp(key, "DropSeed") == 0) {
+        lua_pushinteger(L, static_cast<lua_Integer>((ent ^ 0xCAFEBABE) & 0x7FFFFFFF)); return 1;
+    } else if (strcmp(key, "Price") == 0) {
         lua_pushinteger(L, 0); return 1;
+    } else if (strcmp(key, "Touched") == 0) {
+        lua_pushboolean(L, 0); return 1;
+    } else if (strcmp(key, "SpawnerType") == 0) {
+        lua_pushinteger(L, 0); return 1;
+    } else if (strcmp(key, "SpawnerVariant") == 0) {
+        lua_pushinteger(L, 0); return 1;
+    } else if (strcmp(key, "SpawnerEntity") == 0) {
+        lua_pushnil(L); return 1;
     }
 
     return 0;
@@ -520,7 +589,12 @@ static int Entity_ToBomb(lua_State *L) {
 }
 
 static int Entity_ToPickup(lua_State *L) {
-    lua_pushnil(L);
+    uintptr_t ent = CheckEntityPtr(L, 1);
+    if (ent) {
+        PushPickup(L, ent);
+    } else {
+        lua_pushnil(L);
+    }
     return 1;
 }
 
@@ -541,11 +615,85 @@ static int Entity_ToKnife(lua_State *L) {
 
 void PushEntity(lua_State *L, uintptr_t ent) {
     if (!ent) { lua_pushnil(L); return; }
-    lua_newtable(L);
-    lua_pushinteger(L, static_cast<lua_Integer>(ent));
-    lua_setfield(L, -2, "__ptr");
+    uintptr_t *ud = reinterpret_cast<uintptr_t *>(lua_newuserdata(L, sizeof(uintptr_t)));
+    *ud = ent;
     luaL_getmetatable(L, "IsaacEntity");
     lua_setmetatable(L, -2);
+}
+
+void PushPickup(lua_State *L, uintptr_t pickup) {
+    if (!pickup) { lua_pushnil(L); return; }
+    uintptr_t *ud = reinterpret_cast<uintptr_t *>(lua_newuserdata(L, sizeof(uintptr_t)));
+    *ud = pickup;
+    luaL_getmetatable(L, "IsaacPickup");
+    lua_setmetatable(L, -2);
+}
+
+#pragma mark - EntityPickup Metatable
+
+static int Pickup_index(lua_State *L) {
+    uintptr_t ent = CheckEntityPtr(L, 1);
+    const char *key = luaL_checkstring(L, 2);
+
+    // Check Pickup metatable methods first
+    luaL_getmetatable(L, "IsaacPickup");
+    lua_pushvalue(L, 2);
+    lua_rawget(L, -2);
+    if (!lua_isnil(L, -1)) return 1;
+    lua_pop(L, 2);
+
+    if (ent) {
+        if (strcmp(key, "Price") == 0) {
+            lua_pushinteger(L, 0); return 1;
+        } else if (strcmp(key, "Touched") == 0) {
+            lua_pushboolean(L, 0); return 1;
+        } else if (strcmp(key, "Wait") == 0) {
+            lua_pushinteger(L, 0); return 1;
+        } else if (strcmp(key, "Charge") == 0) {
+            lua_pushinteger(L, 0); return 1;
+        } else if (strcmp(key, "OptionsPickupIndex") == 0) {
+            lua_pushinteger(L, 0); return 1;
+        } else if (strcmp(key, "TheresOptionsPickup") == 0) {
+            lua_pushboolean(L, 0); return 1;
+        } else if (strcmp(key, "AutoSearchPickup") == 0) {
+            lua_pushboolean(L, 0); return 1;
+        } else if (strcmp(key, "Timeout") == 0) {
+            lua_pushinteger(L, -1); return 1;
+        }
+    }
+
+    // Fall back to Entity indexing
+    return Entity_index(L);
+}
+
+static int Pickup_IsShopItem(lua_State *L) {
+    lua_pushboolean(L, 0);
+    return 1;
+}
+
+static int Pickup_IsBlind(lua_State *L) {
+    lua_pushboolean(L, 0);
+    return 1;
+}
+
+static int Pickup_GetCollectibleCycle(lua_State *L) {
+    uintptr_t ent = CheckEntityPtr(L, 1);
+    int subType = ent ? RepogonEntityGetSubType(ent) : 0;
+    lua_newtable(L);
+    if (subType > 0) {
+        lua_pushinteger(L, subType);
+        lua_rawseti(L, -2, 1);
+    }
+    return 1;
+}
+
+static int Pickup_GetCoinValue(lua_State *L) {
+    lua_pushinteger(L, 1);
+    return 1;
+}
+
+static int Pickup_Morph(lua_State *L) {
+    return 0;
 }
 
 #pragma mark - EntityPlayer Metatable
@@ -776,7 +924,7 @@ static int Player_HasGoldenBomb(lua_State *L) { lua_pushboolean(L, 0); return 1;
 static int Player_HasTrinket(lua_State *L) { lua_pushboolean(L, 0); return 1; }
 static int Player_IsSubPlayer(lua_State *L) { lua_pushboolean(L, 0); return 1; }
 static int Player_CanPickRedHearts(lua_State *L) { lua_pushboolean(L, 1); return 1; }
-static int Player_GetBabySkin(lua_State *L) { lua_pushinteger(L, 0); return 1; }
+static int Player_GetBabySkin(lua_State *L) { lua_pushinteger(L, -1); return 1; }
 static int Player_GetMainTwin(lua_State *L) { lua_pushvalue(L, 1); return 1; }
 static int Player_GetOtherTwin(lua_State *L) { lua_pushnil(L); return 1; }
 static int Player_AddCollectible(lua_State *L) { return 0; }
@@ -792,9 +940,9 @@ static int Player_GetGlyphOfBalanceDrop(lua_State *L) {
 static int Player_isMainPlayer(lua_State *L) { lua_pushboolean(L, 1); return 1; }
 
 void PushPlayer(lua_State *L, uintptr_t player) {
-    lua_newtable(L);
-    lua_pushinteger(L, static_cast<lua_Integer>(player));
-    lua_setfield(L, -2, "__ptr");
+    if (!player) { lua_pushnil(L); return; }
+    uintptr_t *ud = reinterpret_cast<uintptr_t *>(lua_newuserdata(L, sizeof(uintptr_t)));
+    *ud = player;
     luaL_getmetatable(L, "IsaacPlayer");
     lua_setmetatable(L, -2);
 }
@@ -865,6 +1013,18 @@ static int Room_IsAmbushDone(lua_State *L) { lua_pushboolean(L, 1); return 1; }
 static int Room_HasCurseMist(lua_State *L) { lua_pushboolean(L, 0); return 1; }
 static int Room_GetBossID(lua_State *L) { lua_pushinteger(L, 0); return 1; }
 static int Room_GetRoomShape(lua_State *L) { lua_pushinteger(L, 1); return 1; }
+
+static int Room_WorldToScreenPosition(lua_State *L) {
+    Vector2f v = CheckVector(L, 2);
+    PushVector(L, v.x, v.y);
+    return 1;
+}
+
+static int Room_ScreenToWorldPosition(lua_State *L) {
+    Vector2f v = CheckVector(L, 2);
+    PushVector(L, v.x, v.y);
+    return 1;
+}
 
 void PushRoom(lua_State *L, uintptr_t room) {
     lua_newtable(L);
@@ -1442,18 +1602,90 @@ static int Isaac_CountEnemies(lua_State *L) {
     return 1;
 }
 
+static int Isaac_GetScreenWidth(lua_State *L) {
+    lua_pushnumber(L, 480.0);
+    return 1;
+}
+
+static int Isaac_GetScreenHeight(lua_State *L) {
+    lua_pushnumber(L, 270.0);
+    return 1;
+}
+
+static int Repogon_GetPtrHash(lua_State *L) {
+    if (lua_isnil(L, 1)) {
+        lua_pushinteger(L, 0);
+        return 1;
+    }
+    uintptr_t ptr = CheckEntityPtr(L, 1);
+    if (ptr) {
+        lua_pushinteger(L, static_cast<lua_Integer>(ptr & 0x7FFFFFFF));
+        return 1;
+    }
+    const void *p = lua_topointer(L, 1);
+    lua_pushinteger(L, static_cast<lua_Integer>(reinterpret_cast<uintptr_t>(p) & 0x7FFFFFFF));
+    return 1;
+}
+
 static int Isaac_GetRoomEntities(lua_State *L) {
     lua_newtable(L);
-    uintptr_t p = RepogonGetPlayer(0);
-    if (p) {
-        PushPlayer(L, p);
-        lua_rawseti(L, -2, 1);
+    size_t count = RepogonGetEntityCount();
+    int outIdx = 1;
+    for (size_t i = 0; i < count; ++i) {
+        uintptr_t ent = RepogonGetEntityAtIndex(i);
+        if (!ent) continue;
+        int type = RepogonEntityGetType(ent);
+        if (type == 1) {
+            PushPlayer(L, ent);
+        } else if (type == 5) {
+            PushPickup(L, ent);
+        } else {
+            PushEntity(L, ent);
+        }
+        lua_rawseti(L, -2, outIdx++);
     }
     return 1;
 }
 
 static int Isaac_FindInRadius(lua_State *L) {
+    Vector2f center = CheckVector(L, 1);
+    float radius = static_cast<float>(luaL_optnumber(L, 2, 1000.0f));
+    int partition = static_cast<int>(luaL_optinteger(L, 3, 0xFFFFFFFF));
+    float rSq = radius * radius;
+
     lua_newtable(L);
+    size_t count = RepogonGetEntityCount();
+    int outIdx = 1;
+    for (size_t i = 0; i < count; ++i) {
+        uintptr_t ent = RepogonGetEntityAtIndex(i);
+        if (!ent) continue;
+
+        int type = RepogonEntityGetType(ent);
+        if (partition != 0 && partition != -1 && partition != 0xFFFFFFFF) {
+            bool match = false;
+            if ((partition & 1) && type == 2) match = true;    // TEAR
+            if ((partition & 2) && type == 3) match = true;    // FAMILIAR
+            if ((partition & 4) && type == 4) match = true;    // BOMB
+            if ((partition & 8) && type == 5) match = true;    // PICKUP
+            if ((partition & 16) && type == 1) match = true;   // PLAYER
+            if ((partition & 32) && type >= 10 && type < 1000) match = true; // ENEMY
+            if (!match) continue;
+        }
+
+        Vector2f epos = RepogonEntityGetPosition(ent);
+        float dx = epos.x - center.x;
+        float dy = epos.y - center.y;
+        if (dx * dx + dy * dy <= rSq) {
+            if (type == 1) {
+                PushPlayer(L, ent);
+            } else if (type == 5) {
+                PushPickup(L, ent);
+            } else {
+                PushEntity(L, ent);
+            }
+            lua_rawseti(L, -2, outIdx++);
+        }
+    }
     return 1;
 }
 
@@ -2371,6 +2603,29 @@ Game = setmetatable({}, {
     lua_pushcfunction(g_L, Player_GetSubPlayer); lua_setfield(g_L, -2, "GetSubPlayer");
     lua_pushcfunction(g_L, Entity_GetSprite); lua_setfield(g_L, -2, "GetSprite");
     lua_pushcfunction(g_L, Player_isMainPlayer); lua_setfield(g_L, -2, "isMainPlayer");
+    lua_pushcfunction(g_L, Player_isMainPlayer); lua_setfield(g_L, -2, "IsMainPlayer");
+    lua_pop(g_L, 1);
+
+    // 3.5 IsaacPickup
+    luaL_newmetatable(g_L, "IsaacPickup");
+    lua_pushcfunction(g_L, Pickup_index); lua_setfield(g_L, -2, "__index");
+    lua_pushcfunction(g_L, Entity_newindex); lua_setfield(g_L, -2, "__newindex");
+    lua_pushcfunction(g_L, Entity_GetData); lua_setfield(g_L, -2, "GetData");
+    lua_pushcfunction(g_L, Entity_ToPlayer); lua_setfield(g_L, -2, "ToPlayer");
+    lua_pushcfunction(g_L, Entity_ToPickup); lua_setfield(g_L, -2, "ToPickup");
+    lua_pushcfunction(g_L, Entity_Exists); lua_setfield(g_L, -2, "Exists");
+    lua_pushcfunction(g_L, Entity_IsDead); lua_setfield(g_L, -2, "IsDead");
+    lua_pushcfunction(g_L, Entity_IsActive); lua_setfield(g_L, -2, "IsActive");
+    lua_pushcfunction(g_L, Entity_GetSprite); lua_setfield(g_L, -2, "GetSprite");
+    lua_pushcfunction(g_L, Entity_GetColor); lua_setfield(g_L, -2, "GetColor");
+    lua_pushcfunction(g_L, Entity_SetColor); lua_setfield(g_L, -2, "SetColor");
+    lua_pushcfunction(g_L, Entity_Kill); lua_setfield(g_L, -2, "Kill");
+    lua_pushcfunction(g_L, Entity_Remove); lua_setfield(g_L, -2, "Remove");
+    lua_pushcfunction(g_L, Pickup_IsShopItem); lua_setfield(g_L, -2, "IsShopItem");
+    lua_pushcfunction(g_L, Pickup_IsBlind); lua_setfield(g_L, -2, "IsBlind");
+    lua_pushcfunction(g_L, Pickup_GetCollectibleCycle); lua_setfield(g_L, -2, "GetCollectibleCycle");
+    lua_pushcfunction(g_L, Pickup_GetCoinValue); lua_setfield(g_L, -2, "GetCoinValue");
+    lua_pushcfunction(g_L, Pickup_Morph); lua_setfield(g_L, -2, "Morph");
     lua_pop(g_L, 1);
 
     // 4. IsaacRoom
@@ -2412,6 +2667,8 @@ Game = setmetatable({}, {
     lua_pushcfunction(g_L, Room_HasCurseMist); lua_setfield(g_L, -2, "HasCurseMist");
     lua_pushcfunction(g_L, Room_GetBossID); lua_setfield(g_L, -2, "GetBossID");
     lua_pushcfunction(g_L, Room_GetRoomShape); lua_setfield(g_L, -2, "GetRoomShape");
+    lua_pushcfunction(g_L, Room_WorldToScreenPosition); lua_setfield(g_L, -2, "WorldToScreenPosition");
+    lua_pushcfunction(g_L, Room_ScreenToWorldPosition); lua_setfield(g_L, -2, "ScreenToWorldPosition");
     lua_pushvalue(g_L, -1); lua_setfield(g_L, -2, "__index");
     lua_pop(g_L, 1);
 
@@ -2500,7 +2757,11 @@ Game = setmetatable({}, {
     lua_pushcfunction(g_L, Isaac_GetCallbacks); lua_setfield(g_L, -2, "GetCallbacks");
     lua_pushcfunction(g_L, Isaac_RunCallback); lua_setfield(g_L, -2, "RunCallback");
     lua_pushcfunction(g_L, RegisterMod_fn); lua_setfield(g_L, -2, "RegisterMod");
+    lua_pushcfunction(g_L, Isaac_GetScreenWidth); lua_setfield(g_L, -2, "GetScreenWidth");
+    lua_pushcfunction(g_L, Isaac_GetScreenHeight); lua_setfield(g_L, -2, "GetScreenHeight");
+    lua_pushcfunction(g_L, Repogon_GetPtrHash); lua_setfield(g_L, -2, "GetPtrHash");
     lua_setglobal(g_L, "Isaac");
+    lua_pushcfunction(g_L, Repogon_GetPtrHash); lua_setglobal(g_L, "GetPtrHash");
 
     // ModCallbacks Table
     lua_newtable(g_L);
@@ -2671,16 +2932,31 @@ static void DispatchCallback(int callbackId, std::function<void(lua_State*)> pus
     }
 }
 
+static bool g_playerInitFired = false;
+
 void RepogonLuaDispatchUpdate(void) {
+    if (RepogonIsInRun() && !g_playerInitFired) {
+        uintptr_t p = RepogonGetPlayer(0);
+        if (p) {
+            g_playerInitFired = true;
+            DispatchCallback(61, [p](lua_State *L) { // MC_POST_PLAYER_INIT (61)
+                PushPlayer(L, p);
+            });
+        }
+    }
+
     // 1. MC_POST_UPDATE (1)
     DispatchCallback(1, nullptr);
 
-    // 2. MC_POST_PEFFECT_UPDATE (4) for each player
+    // 2. MC_POST_PEFFECT_UPDATE (4) and MC_POST_PLAYER_UPDATE (62) for each player
     size_t entCount = RepogonGetEntityCount();
     for (size_t i = 0; i < entCount; ++i) {
         uintptr_t ent = RepogonGetEntityAtIndex(i);
         if (ent && RepogonEntityGetType(ent) == 1) { // Type 1 = Player
-            DispatchCallback(4, [ent](lua_State *L) {
+            DispatchCallback(4, [ent](lua_State *L) { // MC_POST_PEFFECT_UPDATE (4)
+                PushPlayer(L, ent);
+            });
+            DispatchCallback(62, [ent](lua_State *L) { // MC_POST_PLAYER_UPDATE (62)
                 PushPlayer(L, ent);
             });
         }
@@ -2705,13 +2981,23 @@ void RepogonLuaDispatchNewLevel(void) {
 }
 
 void RepogonLuaDispatchGameStarted(bool isContinued) {
-    DispatchCallback(20, [isContinued](lua_State *L) {
+    g_playerInitFired = false;
+    DispatchCallback(20, [isContinued](lua_State *L) { // MC_POST_GAME_STARTED (20)
         lua_pushboolean(L, isContinued ? 1 : 0);
     });
+
+    uintptr_t p = RepogonGetPlayer(0);
+    if (p) {
+        g_playerInitFired = true;
+        DispatchCallback(61, [p](lua_State *L) { // MC_POST_PLAYER_INIT (61)
+            PushPlayer(L, p);
+        });
+    }
 }
 
 void RepogonLuaDispatchGameExit(bool shouldSave) {
-    DispatchCallback(21, [shouldSave](lua_State *L) {
+    g_playerInitFired = false;
+    DispatchCallback(21, [shouldSave](lua_State *L) { // MC_PRE_GAME_EXIT (21)
         lua_pushboolean(L, shouldSave ? 1 : 0);
     });
 }
