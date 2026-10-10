@@ -346,20 +346,24 @@ static int Sprite_new(lua_State *L) {
     lua_setfield(L, -2, "Scale");
 
     auto dummyFunc = [](lua_State *st) -> int { return 0; };
-    lua_pushcfunction(L, [](lua_State *st) -> int {
+    auto loadFunc = [](lua_State *st) -> int {
         const char *fn = luaL_optstring(st, 2, "");
         lua_pushstring(st, fn);
         lua_setfield(st, 1, "__anm2");
         lua_pushboolean(st, 1);
         return 1;
-    }); lua_setfield(L, -2, "Load");
+    };
+    lua_pushcfunction(L, loadFunc); lua_setfield(L, -2, "Load");
     lua_pushcfunction(L, dummyFunc); lua_setfield(L, -2, "Play");
     lua_pushcfunction(L, dummyFunc); lua_setfield(L, -2, "SetFrame");
     lua_pushcfunction(L, dummyFunc); lua_setfield(L, -2, "SetLastFrame");
     lua_pushcfunction(L, dummyFunc); lua_setfield(L, -2, "SetAnimation");
     lua_pushcfunction(L, dummyFunc); lua_setfield(L, -2, "Update");
-    lua_pushcfunction(L, [](lua_State *st) -> int {
-        Vector2f pos = {0.0f, 0.0f};
+
+    auto renderFunc = [](lua_State *st) -> int {
+        Vector2f pos;
+        pos.x = 0.0f;
+        pos.y = 0.0f;
         if (lua_istable(st, 2) || lua_isuserdata(st, 2)) {
             pos = CheckVector(st, 2);
         }
@@ -372,7 +376,8 @@ static int Sprite_new(lua_State *L) {
         }
         lua_pop(st, 1);
         return 0;
-    }); lua_setfield(L, -2, "Render");
+    };
+    lua_pushcfunction(L, renderFunc); lua_setfield(L, -2, "Render");
     lua_pushcfunction(L, dummyFunc); lua_setfield(L, -2, "RenderLayer");
     lua_pushcfunction(L, dummyFunc); lua_setfield(L, -2, "ReplaceSpritesheet");
     lua_pushcfunction(L, dummyFunc); lua_setfield(L, -2, "LoadGraphics");
