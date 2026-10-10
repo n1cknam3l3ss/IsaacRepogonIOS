@@ -2,6 +2,7 @@
 #import "RepogonEngine.h"
 #import "RepogonLogger.h"
 #import "RepogonOverlay.h"
+#import "lua_json.h"
 
 extern "C" {
 #include "lua.h"
@@ -18,6 +19,18 @@ extern "C" {
 namespace {
 
 lua_State *g_L = nullptr;
+
+static int LuaInclude(lua_State *L) {
+    const char *path = luaL_checkstring(L, 1);
+    std::string p(path);
+    if (p.size() >= 4 && p.substr(p.size() - 4) == ".lua") {
+        p = p.substr(0, p.size() - 4);
+    }
+    lua_getglobal(L, "require");
+    lua_pushstring(L, p.c_str());
+    lua_call(L, 1, 1);
+    return 1;
+}
 
 struct CallbackEntry {
     std::string modName;
@@ -604,6 +617,11 @@ static int Game_Spawn(lua_State *L) {
     return 1;
 }
 
+static int Game_GetNumPlayers(lua_State *L) {
+    lua_pushinteger(L, 1);
+    return 1;
+}
+
 void PushGame(lua_State *L, uintptr_t game) {
     if (!game) { lua_pushnil(L); return; }
     lua_newtable(L);
@@ -630,6 +648,11 @@ static int Level_GetCurrentRoomIndex(lua_State *L) {
 
 static int Level_GetCurses(lua_State *L) {
     lua_pushinteger(L, 0);
+    return 1;
+}
+
+static int Level_GetPlanetariumChance(lua_State *L) {
+    lua_pushnumber(L, 0.01);
     return 1;
 }
 
@@ -761,6 +784,27 @@ static int Isaac_GetPillEffectIdByName(lua_State *L) {
 
 static int Isaac_GetItemConfig(lua_State *L) {
     lua_newtable(L);
+    lua_pushcfunction(L, [](lua_State *st) -> int {
+        lua_newtable(st);
+        lua_pushinteger(st, 730); lua_setfield(st, -2, "Size");
+        return 1;
+    });
+    lua_setfield(L, -2, "GetCollectibles");
+
+    lua_pushcfunction(L, [](lua_State *st) -> int {
+        lua_newtable(st);
+        lua_pushinteger(st, 190); lua_setfield(st, -2, "Size");
+        return 1;
+    });
+    lua_setfield(L, -2, "GetTrinkets");
+
+    lua_pushcfunction(L, [](lua_State *st) -> int {
+        lua_newtable(st);
+        lua_pushinteger(st, 90); lua_setfield(st, -2, "Size");
+        return 1;
+    });
+    lua_setfield(L, -2, "GetCards");
+
     lua_pushcfunction(L, [](lua_State *st) -> int {
         lua_newtable(st);
         return 1;
@@ -899,6 +943,26 @@ bool RepogonLuaInit(void) {
     lua_pushcfunction(g_L, LuaPrint);
     lua_setglobal(g_L, "print");
 
+    // Global include
+    lua_pushcfunction(g_L, LuaInclude);
+    lua_setglobal(g_L, "include");
+
+    // Preload json library
+    if (kJsonLuaSource) {
+        luaL_dostring(g_L, kJsonLuaSource);
+    }
+
+    // Dynamic enum tables with fallback metatable
+    luaL_dostring(g_L,
+        "local meta = { __index = function(t, k) return 1 end }\n"
+        "CollectibleType = setmetatable({ COLLECTIBLE_KEY_PIECE_1 = 238, COLLECTIBLE_KEY_PIECE_2 = 239 }, meta)\n"
+        "TrinketType = setmetatable({}, meta)\n"
+        "Card = setmetatable({}, meta)\n"
+        "PillEffect = setmetatable({}, meta)\n"
+        "ButtonAction = setmetatable({}, meta)\n"
+        "Keyboard = setmetatable({}, meta)\n"
+    );
+
     // Global RegisterMod
     lua_pushcfunction(g_L, RegisterMod_fn);
     lua_setglobal(g_L, "RegisterMod");
@@ -983,6 +1047,7 @@ bool RepogonLuaInit(void) {
     lua_pushcfunction(g_L, Game_GetRoom); lua_setfield(g_L, -2, "GetRoom");
     lua_pushcfunction(g_L, Game_GetLevel); lua_setfield(g_L, -2, "GetLevel");
     lua_pushcfunction(g_L, Game_GetFrameCount); lua_setfield(g_L, -2, "GetFrameCount");
+    lua_pushcfunction(g_L, Game_GetNumPlayers); lua_setfield(g_L, -2, "GetNumPlayers");
     lua_pushcfunction(g_L, Game_Spawn); lua_setfield(g_L, -2, "Spawn");
     lua_pushvalue(g_L, -1); lua_setfield(g_L, -2, "__index");
     lua_pop(g_L, 1);
@@ -993,6 +1058,7 @@ bool RepogonLuaInit(void) {
     lua_pushcfunction(g_L, Level_GetStageType); lua_setfield(g_L, -2, "GetStageType");
     lua_pushcfunction(g_L, Level_GetCurrentRoomIndex); lua_setfield(g_L, -2, "GetCurrentRoomIndex");
     lua_pushcfunction(g_L, Level_GetCurses); lua_setfield(g_L, -2, "GetCurses");
+    lua_pushcfunction(g_L, Level_GetPlanetariumChance); lua_setfield(g_L, -2, "GetPlanetariumChance");
     lua_pushvalue(g_L, -1); lua_setfield(g_L, -2, "__index");
     lua_pop(g_L, 1);
 

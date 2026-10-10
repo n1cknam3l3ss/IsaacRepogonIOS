@@ -44,8 +44,8 @@ jobs:
         if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.1.0
-          name: "Isaac REPENTOGON iOS v1.1.0 (Asset Redirection & XML Merger)"
+          tag_name: v1.1.1
+          name: "Isaac REPENTOGON iOS v1.1.1 (JSON, Include & Workshop Compatibility)"
           body: |
             ## Isaac REPENTOGON iOS (v1.1.0)
 
