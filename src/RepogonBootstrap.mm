@@ -31,6 +31,8 @@ static uint32_t g_lastFrameCount = 0;
 static RepogonTickTarget *g_tickTarget = nil;
 static bool g_inRun = false;
 
+static int g_noPlayerFrames = 0;
+
 void RepogonTick(void) {
     uintptr_t game = RepogonGetGame();
     if (!game) return;
@@ -59,14 +61,20 @@ void RepogonTick(void) {
     // In-run game lifecycle detection
     uintptr_t player0 = RepogonGetPlayer(0);
     if (player0 && room) {
+        g_noPlayerFrames = 0;
         if (!g_inRun) {
             g_inRun = true;
             RepogonLuaDispatchGameStarted(false);
         }
-    } else {
+    } else if (!room) {
         if (g_inRun) {
-            g_inRun = false;
-            RepogonLuaDispatchGameExit(true);
+            g_noPlayerFrames++;
+            if (g_noPlayerFrames > 90) { // 1.5s of consecutive null room
+                g_inRun = false;
+                RepogonLuaDispatchGameExit(true);
+                g_lastRoom = 0;
+                g_lastStage = -1;
+            }
         }
     }
 
@@ -118,7 +126,11 @@ void RepogonStart(void) {
 
 __attribute__((constructor)) static void RepogonConstructor(void) {
     @autoreleasepool {
+        RepogonLogInit();
         RepogonVFSInit();
+        RepogonModManagerInit();
+        RepogonModManagerScanAssetsAndMergeXML();
+
         dispatch_async(dispatch_get_main_queue(), ^{
             NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
             [center addObserverForName:UIApplicationDidBecomeActiveNotification

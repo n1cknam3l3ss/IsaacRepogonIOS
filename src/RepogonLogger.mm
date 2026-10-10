@@ -8,8 +8,7 @@ static std::mutex g_logMutex;
 static NSString *g_logFilePath = nil;
 static std::ofstream g_logFile;
 
-void RepogonLogInit(void) {
-    std::lock_guard<std::mutex> lock(g_logMutex);
+static void RepogonLogInitLocked(void) {
     if (!g_logFilePath) {
         NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
         NSString *docDir = paths.firstObject;
@@ -24,6 +23,11 @@ void RepogonLogInit(void) {
     }
 }
 
+void RepogonLogInit(void) {
+    std::lock_guard<std::mutex> lock(g_logMutex);
+    RepogonLogInitLocked();
+}
+
 NSString *RepogonGetLogFilePath(void) {
     return g_logFilePath;
 }
@@ -31,6 +35,7 @@ NSString *RepogonGetLogFilePath(void) {
 void RepogonLogRaw(const char *message) {
     if (!message) return;
     std::lock_guard<std::mutex> lock(g_logMutex);
+    RepogonLogInitLocked();
     NSLog(@"[REPENTOGON] %s", message);
     if (g_logFile.is_open()) {
         g_logFile << message << "\n" << std::flush;

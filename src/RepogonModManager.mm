@@ -69,7 +69,7 @@ void RepogonModManagerInit(void) {
     CreateSampleModIfNeeded(modsDir);
 }
 
-void RepogonModManagerScanAndLoadMods(void) {
+void RepogonModManagerScanAssetsAndMergeXML(void) {
     NSString *modsDir = RepogonGetModsDirectory();
     NSFileManager *fm = [NSFileManager defaultManager];
 
@@ -100,6 +100,16 @@ void RepogonModManagerScanAndLoadMods(void) {
 
     // 2. Perform dynamic XML merging (players.xml, items.xml, etc.)
     RepogonXMLMergerProcessMods(validModDirs);
+}
+
+void RepogonModManagerScanAndLoadMods(void) {
+    RepogonModManagerScanAssetsAndMergeXML();
+
+    NSString *modsDir = RepogonGetModsDirectory();
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSArray<NSString *> *items = [fm contentsOfDirectoryAtPath:modsDir error:nil];
+    if (!items) return;
+    items = [items sortedArrayUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
 
     // 3. Load Lua scripts
     lua_State *L = RepogonLuaGetState();

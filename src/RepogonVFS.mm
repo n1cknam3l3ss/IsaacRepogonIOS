@@ -32,8 +32,10 @@ static const char *kMarkers[] = {
     "afterbirthplus-resources/",
     "afterbirth-resources/",
     "rebirth-resources/",
+    "resources-dlc3/",
     "resources/",
-    "content/"
+    "content/",
+    "data/"
 };
 
 static const char *GetBaseName(const char *path) {
@@ -87,6 +89,15 @@ const char *RepogonVFSRedirectPath(const char *originalPath) {
         return it->second.c_str();
     }
 
+    // 1. Check if this is an XML file that was merged dynamically (e.g. players.xml, entities2.xml)
+    const char *baseName = GetBaseName(originalPath);
+    const char *mergedXml = RepogonGetMergedXMLPath(baseName);
+    if (mergedXml) {
+        g_redirectCache[originalPath] = mergedXml;
+        RepogonLog(@"[VFS] Redirected XML: %s -> %s", originalPath, mergedXml);
+        return g_redirectCache[originalPath].c_str();
+    }
+
     // Look for resource directory marker in path
     const char *rel = nullptr;
     for (const char *marker : kMarkers) {
@@ -103,15 +114,6 @@ const char *RepogonVFSRedirectPath(const char *originalPath) {
     }
 
     while (rel[0] == '/') rel++; // Skip leading slash
-
-    // 1. Check if this is an XML file that was merged dynamically
-    const char *baseName = GetBaseName(rel);
-    const char *mergedXml = RepogonGetMergedXMLPath(baseName);
-    if (mergedXml) {
-        g_redirectCache[originalPath] = mergedXml;
-        RepogonLog(@"[VFS] Redirected XML: %s -> %s", originalPath, mergedXml);
-        return g_redirectCache[originalPath].c_str();
-    }
 
     // 2. Check active mod directories for the requested asset
     for (const auto &mDir : g_modDirs) {

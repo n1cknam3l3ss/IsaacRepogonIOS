@@ -109,6 +109,10 @@ void RepogonOverlayFlush(void) {
         g_pendingCommands.clear();
     }
 
+    if (cmds.empty() && (!g_overlayView || g_overlayView.commands.empty())) {
+        return;
+    }
+
     dispatch_async(dispatch_get_main_queue(), ^{
         if (!g_overlayView) {
             RepogonOverlayInit();

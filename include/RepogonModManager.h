@@ -7,6 +7,7 @@ extern "C" {
 #endif
 
 void RepogonModManagerInit(void);
+void RepogonModManagerScanAssetsAndMergeXML(void);
 void RepogonModManagerScanAndLoadMods(void);
 NSString *RepogonGetModsDirectory(void);
 

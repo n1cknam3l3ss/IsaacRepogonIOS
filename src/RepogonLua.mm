@@ -37,6 +37,7 @@ struct CallbackEntry {
     int modRef; // Reference to mod table in LUA_REGISTRYINDEX (self)
     int funcRef;
     int param; // Optional entity type, item ID, or -1
+    int priority; // Callback priority (higher priority runs first)
 };
 
 static int GetCallbackId(lua_State *L, int index) {
@@ -812,6 +813,7 @@ static int Room_RemoveDoor(lua_State *L) { return 0; }
 static int Room_FindFreeTilePosition(lua_State *L) { PushVector(L, 320.0f, 240.0f); return 1; }
 static int Room_GetGridWidth(lua_State *L) { lua_pushinteger(L, 13); return 1; }
 static int Room_GetGridHeight(lua_State *L) { lua_pushinteger(L, 7); return 1; }
+static int Room_GetGridSize(lua_State *L) { lua_pushinteger(L, 135); return 1; }
 static int Room_SetFloorColor(lua_State *L) { return 0; }
 static int Room_SetWallColor(lua_State *L) { return 0; }
 static int Room_GetBackdropType(lua_State *L) { lua_pushinteger(L, 1); return 1; }
@@ -938,10 +940,11 @@ void PushGame(lua_State *L, uintptr_t game) {
     lua_setmetatable(L, -2);
 }
 
-static void PushRoomDesc(lua_State *L) {
+static void PushRoomDesc(lua_State *L, int gridIndex = 0) {
     lua_newtable(L);
-    lua_pushinteger(L, 0); lua_setfield(L, -2, "SafeGridIndex");
-    lua_pushinteger(L, 0); lua_setfield(L, -2, "GridIndex");
+    lua_pushinteger(L, gridIndex); lua_setfield(L, -2, "SafeGridIndex");
+    lua_pushinteger(L, gridIndex); lua_setfield(L, -2, "GridIndex");
+    lua_pushinteger(L, static_cast<lua_Integer>(0x100000 + gridIndex)); lua_setfield(L, -2, "__ptr");
     lua_pushinteger(L, 1); lua_setfield(L, -2, "VisitedCount");
     lua_pushinteger(L, 0); lua_setfield(L, -2, "Flags");
     lua_pushboolean(L, 1); lua_setfield(L, -2, "Clear");
@@ -980,17 +983,18 @@ static int Level_GetPlanetariumChance(lua_State *L) {
 }
 
 static int Level_GetCurrentRoomDesc(lua_State *L) {
-    PushRoomDesc(L);
+    PushRoomDesc(L, 0);
     return 1;
 }
 
 static int Level_GetLastRoomDesc(lua_State *L) {
-    PushRoomDesc(L);
+    PushRoomDesc(L, 0);
     return 1;
 }
 
 static int Level_GetRoomByIdx(lua_State *L) {
-    PushRoomDesc(L);
+    int roomIdx = static_cast<int>(luaL_optinteger(L, 2, 0));
+    PushRoomDesc(L, roomIdx);
     return 1;
 }
 
@@ -998,12 +1002,13 @@ static int Level_GetRooms(lua_State *L) {
     lua_newtable(L);
     lua_pushinteger(L, 1); lua_setfield(L, -2, "Size");
     lua_pushcfunction(L, [](lua_State *st) -> int {
-        PushRoomDesc(st);
+        int idx = static_cast<int>(luaL_optinteger(st, 2, 0));
+        PushRoomDesc(st, idx);
         return 1;
     });
     lua_setfield(L, -2, "Get");
 
-    PushRoomDesc(L);
+    PushRoomDesc(L, 0);
     lua_pushvalue(L, -1);
     lua_rawseti(L, -3, 0);
     lua_rawseti(L, -2, 1);
@@ -1183,6 +1188,7 @@ static int Isaac_GetItemConfig(lua_State *L) {
     lua_pushcfunction(L, [](lua_State *st) -> int {
         lua_newtable(st);
         lua_pushinteger(st, 730); lua_setfield(st, -2, "Size");
+        lua_pushcfunction(st, PushDummyItemEntry); lua_setfield(st, -2, "Get");
         return 1;
     });
     lua_setfield(L, -2, "GetCollectibles");
@@ -1190,6 +1196,7 @@ static int Isaac_GetItemConfig(lua_State *L) {
     lua_pushcfunction(L, [](lua_State *st) -> int {
         lua_newtable(st);
         lua_pushinteger(st, 190); lua_setfield(st, -2, "Size");
+        lua_pushcfunction(st, PushDummyItemEntry); lua_setfield(st, -2, "Get");
         return 1;
     });
     lua_setfield(L, -2, "GetTrinkets");
@@ -1197,6 +1204,7 @@ static int Isaac_GetItemConfig(lua_State *L) {
     lua_pushcfunction(L, [](lua_State *st) -> int {
         lua_newtable(st);
         lua_pushinteger(st, 90); lua_setfield(st, -2, "Size");
+        lua_pushcfunction(st, PushDummyItemEntry); lua_setfield(st, -2, "Get");
         return 1;
     });
     lua_setfield(L, -2, "GetCards");
@@ -1418,9 +1426,51 @@ static int Mod_AddCallback(lua_State *L) {
     entry.modRef = modRef;
     entry.funcRef = funcRef;
     entry.param = param;
+    entry.priority = 0;
 
     g_callbacks[callbackId].push_back(entry);
+    std::stable_sort(g_callbacks[callbackId].begin(), g_callbacks[callbackId].end(),
+                     [](const CallbackEntry &a, const CallbackEntry &b) {
+                         return a.priority > b.priority;
+                     });
+
     RepogonLog(@"Registered callback %d for mod [%s]", callbackId, modName.c_str());
+    return 0;
+}
+
+static int Mod_AddPriorityCallback(lua_State *L) {
+    // mod:AddPriorityCallback(callbackId, priority, func, [param])
+    lua_getfield(L, 1, "Name");
+    std::string modName = luaL_optstring(L, -1, "UnknownMod");
+    lua_pop(L, 1);
+
+    int callbackId = GetCallbackId(L, 2);
+    int priority = static_cast<int>(luaL_optinteger(L, 3, 0));
+    if (!lua_isfunction(L, 4)) {
+        return luaL_error(L, "bad argument #3 to 'AddPriorityCallback' (function expected)");
+    }
+    int param = static_cast<int>(luaL_optinteger(L, 5, -1));
+
+    lua_pushvalue(L, 1);
+    int modRef = luaL_ref(L, LUA_REGISTRYINDEX);
+
+    lua_pushvalue(L, 4);
+    int funcRef = luaL_ref(L, LUA_REGISTRYINDEX);
+
+    CallbackEntry entry;
+    entry.modName = modName;
+    entry.modRef = modRef;
+    entry.funcRef = funcRef;
+    entry.param = param;
+    entry.priority = priority;
+
+    g_callbacks[callbackId].push_back(entry);
+    std::stable_sort(g_callbacks[callbackId].begin(), g_callbacks[callbackId].end(),
+                     [](const CallbackEntry &a, const CallbackEntry &b) {
+                         return a.priority > b.priority;
+                     });
+
+    RepogonLog(@"Registered priority callback %d (priority %d) for mod [%s]", callbackId, priority, modName.c_str());
     return 0;
 }
 
@@ -1515,6 +1565,7 @@ static int RegisterMod_fn(lua_State *L) {
     lua_pushinteger(L, apiVersion); lua_setfield(L, -2, "ApiVersion");
 
     lua_pushcfunction(L, Mod_AddCallback); lua_setfield(L, -2, "AddCallback");
+    lua_pushcfunction(L, Mod_AddPriorityCallback); lua_setfield(L, -2, "AddPriorityCallback");
     lua_pushcfunction(L, Mod_RemoveCallback); lua_setfield(L, -2, "RemoveCallback");
     lua_pushcfunction(L, Mod_SaveData); lua_setfield(L, -2, "SaveData");
     lua_pushcfunction(L, Mod_LoadData); lua_setfield(L, -2, "LoadData");
@@ -1626,13 +1677,43 @@ local enum_meta = {
         if k == 'NUM_TRINKETS' then return 189 end
         if k == 'NUM_COLLECTIBLES' then return 732 end
         if type(k) == 'number' then return k end
-        return 1
+        local val = rawget(t, '__next_id') or 100
+        rawset(t, '__next_id', val + 1)
+        rawset(t, k, val)
+        return val
     end
 }
 
 local function make_enum(tbl)
     return setmetatable(tbl or {}, enum_meta)
 end
+
+GetPtrHash = function(ent)
+    if type(ent) == "table" then
+        return ent.__ptr or (ent.GridIndex and (0x100000 + ent.GridIndex)) or tostring(ent)
+    elseif ent ~= nil then
+        return tostring(ent)
+    else
+        return 0
+    end
+end
+
+EntityPartition = make_enum({
+    TEAR = 1,
+    FAMILIAR = 2,
+    BOMB = 4,
+    PICKUP = 8,
+    PLAYER = 16,
+    ENEMY = 32,
+    EFFECT = 64
+})
+BackdropType = make_enum({})
+CallbackPriority = make_enum({
+    EARLY = 100,
+    IMPORTANT = 10,
+    DEFAULT = 0,
+    LATE = -100
+})
 
 PillColor = make_enum({ PILL_NULL = 0, NUM_PILLS = 25 })
 PillEffect = make_enum({ PILLEFFECT_NULL = 0 })
@@ -2017,6 +2098,7 @@ Game = setmetatable({}, {
     lua_pushcfunction(g_L, Room_FindFreeTilePosition); lua_setfield(g_L, -2, "FindFreeTilePosition");
     lua_pushcfunction(g_L, Room_GetGridWidth); lua_setfield(g_L, -2, "GetGridWidth");
     lua_pushcfunction(g_L, Room_GetGridHeight); lua_setfield(g_L, -2, "GetGridHeight");
+    lua_pushcfunction(g_L, Room_GetGridSize); lua_setfield(g_L, -2, "GetGridSize");
     lua_pushcfunction(g_L, Room_SetFloorColor); lua_setfield(g_L, -2, "SetFloorColor");
     lua_pushcfunction(g_L, Room_SetWallColor); lua_setfield(g_L, -2, "SetWallColor");
     lua_pushcfunction(g_L, Room_GetBackdropType); lua_setfield(g_L, -2, "GetBackdropType");
@@ -2200,7 +2282,16 @@ bool RepogonLuaRunFile(const char *filePath) {
     if (!g_L || !filePath) return false;
     int err = luaL_dofile(g_L, filePath);
     if (err != LUA_OK) {
-        const char *msg = lua_tostring(g_L, -1);
+        const char *msg = nullptr;
+        if (lua_istable(g_L, -1)) {
+            lua_getfield(g_L, -1, "message");
+            if (lua_isstring(g_L, -1)) msg = lua_tostring(g_L, -1);
+            lua_pop(g_L, 1);
+        }
+        if (!msg) {
+            msg = luaL_tolstring(g_L, -1, nullptr);
+            lua_pop(g_L, 1);
+        }
         RepogonLog(@"Lua Error in [%s]: %s", filePath, msg ? msg : "unknown");
         lua_pop(g_L, 1);
         return false;
@@ -2212,7 +2303,16 @@ bool RepogonLuaRunString(const char *script) {
     if (!g_L || !script) return false;
     int err = luaL_dostring(g_L, script);
     if (err != LUA_OK) {
-        const char *msg = lua_tostring(g_L, -1);
+        const char *msg = nullptr;
+        if (lua_istable(g_L, -1)) {
+            lua_getfield(g_L, -1, "message");
+            if (lua_isstring(g_L, -1)) msg = lua_tostring(g_L, -1);
+            lua_pop(g_L, 1);
+        }
+        if (!msg) {
+            msg = luaL_tolstring(g_L, -1, nullptr);
+            lua_pop(g_L, 1);
+        }
         RepogonLog(@"Lua Error executing string: %s", msg ? msg : "unknown");
         lua_pop(g_L, 1);
         return false;
