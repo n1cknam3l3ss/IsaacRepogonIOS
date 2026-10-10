@@ -8,6 +8,7 @@ extern "C" {
 
 void RepogonStart(void);
 void RepogonTick(void);
+bool RepogonIsInRun(void);
 
 #ifdef __cplusplus
 }

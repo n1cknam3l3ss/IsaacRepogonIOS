@@ -33,6 +33,10 @@ static bool g_inRun = false;
 
 static int g_noPlayerFrames = 0;
 
+bool RepogonIsInRun(void) {
+    return g_inRun;
+}
+
 void RepogonTick(void) {
     uintptr_t game = RepogonGetGame();
     if (!game) return;
@@ -62,36 +66,35 @@ void RepogonTick(void) {
                 g_lastStage = -1;
             }
         }
-        return; // Don't dispatch in-game callbacks when not in a valid run
     }
 
-    if (!g_inRun) return;
+    if (g_inRun) {
+        // Room transition detection
+        if (room != g_lastRoom) {
+            g_lastRoom = room;
+            RepogonLuaDispatchNewRoom();
+        }
 
-    // Room transition detection
-    if (room != g_lastRoom) {
-        g_lastRoom = room;
-        RepogonLuaDispatchNewRoom();
+        // Stage transition detection
+        int32_t stage = RepogonGameGetStage();
+        if (stage != g_lastStage) {
+            g_lastStage = stage;
+            RepogonLuaDispatchNewLevel();
+        }
+
+        // Game loop ticks
+        uint32_t frameCount = RepogonGameGetFrameCount();
+        if (frameCount != g_lastFrameCount) {
+            g_lastFrameCount = frameCount;
+            RepogonLuaDispatchUpdate();
+        }
+
+        // Guaranteed Void portal check
+        RepogonVoidWatchdogTick();
     }
 
-    // Stage transition detection
-    int32_t stage = RepogonGameGetStage();
-    if (stage != g_lastStage) {
-        g_lastStage = stage;
-        RepogonLuaDispatchNewLevel();
-    }
-
-    // Game loop ticks
-    uint32_t frameCount = RepogonGameGetFrameCount();
-    if (frameCount != g_lastFrameCount) {
-        g_lastFrameCount = frameCount;
-        RepogonLuaDispatchUpdate();
-    }
-
-    // Render pass
+    // Always run render pass (flushes overlay view; MC_POST_RENDER runs on menu, MC_HUD_RENDER is guarded by g_inRun inside)
     RepogonLuaDispatchRender();
-
-    // Guaranteed Void portal check
-    RepogonVoidWatchdogTick();
 }
 
 void RepogonStart(void) {

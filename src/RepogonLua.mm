@@ -2,6 +2,7 @@
 #import "RepogonEngine.h"
 #import "RepogonLogger.h"
 #import "RepogonOverlay.h"
+#import "RepogonBootstrap.h"
 #import "RepogonXMLMerger.h"
 #import "lua_json.h"
 
@@ -929,6 +930,7 @@ static int Game_GetSeeds(lua_State *L) {
 static int Game_GetItemPool(lua_State *L) {
     lua_newtable(L);
     lua_pushcfunction(L, [](lua_State *st) -> int { lua_pushinteger(st, 1); return 1; }); lua_setfield(L, -2, "GetCollectible");
+    lua_pushcfunction(L, [](lua_State *st) -> int { lua_newtable(st); return 1; }); lua_setfield(L, -2, "GetCollectiblesFromPool");
     return 1;
 }
 
@@ -1224,17 +1226,92 @@ static int Isaac_GetPillEffectIdByName(lua_State *L) {
     return 1;
 }
 
-static int PushDummyItemEntry(lua_State *L) {
+static int ItemConfig_GetIdArg(lua_State *L) {
+    if (lua_isnumber(L, 1)) return static_cast<int>(lua_tointeger(L, 1));
+    if (lua_isnumber(L, 2)) return static_cast<int>(lua_tointeger(L, 2));
+    return 0;
+}
+
+static int ItemConfig_GetCollectible(lua_State *L) {
+    int id = ItemConfig_GetIdArg(L);
+    if (id <= 0 || id > 732) {
+        lua_pushnil(L);
+        return 1;
+    }
+
     lua_newtable(L);
+    lua_pushinteger(L, id); lua_setfield(L, -2, "ID");
     lua_pushstring(L, "Item"); lua_setfield(L, -2, "Name");
     lua_pushstring(L, ""); lua_setfield(L, -2, "Description");
     lua_pushboolean(L, 0); lua_setfield(L, -2, "Hidden");
-    lua_pushinteger(L, 0); lua_setfield(L, -2, "ID");
-    lua_pushinteger(L, 0); lua_setfield(L, -2, "Type");
+    lua_pushinteger(L, 1); lua_setfield(L, -2, "Type");
+    lua_pushinteger(L, 1); lua_setfield(L, -2, "Quality");
+    lua_pushinteger(L, 1); lua_setfield(L, -2, "CraftingQuality");
     lua_pushinteger(L, 0); lua_setfield(L, -2, "InitCharge");
     lua_pushinteger(L, 0); lua_setfield(L, -2, "MaxCharges");
     lua_pushcfunction(L, [](lua_State *st) -> int { lua_pushboolean(st, 1); return 1; });
     lua_setfield(L, -2, "IsAvailable");
+    lua_pushcfunction(L, [](lua_State *st) -> int { lua_pushboolean(st, 0); return 1; });
+    lua_setfield(L, -2, "HasTags");
+    return 1;
+}
+
+static int ItemConfig_GetTrinket(lua_State *L) {
+    int id = ItemConfig_GetIdArg(L);
+    if (id <= 0 || id > 189) {
+        lua_pushnil(L);
+        return 1;
+    }
+
+    lua_newtable(L);
+    lua_pushinteger(L, id); lua_setfield(L, -2, "ID");
+    lua_pushstring(L, "Trinket"); lua_setfield(L, -2, "Name");
+    lua_pushstring(L, ""); lua_setfield(L, -2, "Description");
+    lua_pushboolean(L, 0); lua_setfield(L, -2, "Hidden");
+    lua_pushinteger(L, 2); lua_setfield(L, -2, "Type");
+    lua_pushcfunction(L, [](lua_State *st) -> int { lua_pushboolean(st, 1); return 1; });
+    lua_setfield(L, -2, "IsAvailable");
+    return 1;
+}
+
+static int ItemConfig_GetCard(lua_State *L) {
+    int id = ItemConfig_GetIdArg(L);
+    if (id <= 0 || id > 97) {
+        lua_pushnil(L);
+        return 1;
+    }
+
+    lua_newtable(L);
+    lua_pushinteger(L, id); lua_setfield(L, -2, "ID");
+    lua_pushstring(L, "Card"); lua_setfield(L, -2, "Name");
+    lua_pushstring(L, ""); lua_setfield(L, -2, "Description");
+    lua_pushinteger(L, 3); lua_setfield(L, -2, "Type");
+    return 1;
+}
+
+static int ItemConfig_GetPillEffect(lua_State *L) {
+    int id = ItemConfig_GetIdArg(L);
+    if (id <= 0 || id > 49) {
+        lua_pushnil(L);
+        return 1;
+    }
+
+    lua_newtable(L);
+    lua_pushinteger(L, id); lua_setfield(L, -2, "ID");
+    lua_pushstring(L, "Pill"); lua_setfield(L, -2, "Name");
+    return 1;
+}
+
+static int ItemConfig_GetNullItem(lua_State *L) {
+    int id = ItemConfig_GetIdArg(L);
+    if (id <= 0 || id > 100) {
+        lua_pushnil(L);
+        return 1;
+    }
+
+    lua_newtable(L);
+    lua_pushinteger(L, id); lua_setfield(L, -2, "ID");
+    lua_pushstring(L, "NullItem"); lua_setfield(L, -2, "Name");
     return 1;
 }
 
@@ -1242,33 +1319,33 @@ static int Isaac_GetItemConfig(lua_State *L) {
     lua_newtable(L);
     lua_pushcfunction(L, [](lua_State *st) -> int {
         lua_newtable(st);
-        lua_pushinteger(st, 730); lua_setfield(st, -2, "Size");
-        lua_pushcfunction(st, PushDummyItemEntry); lua_setfield(st, -2, "Get");
+        lua_pushinteger(st, 732); lua_setfield(st, -2, "Size");
+        lua_pushcfunction(st, ItemConfig_GetCollectible); lua_setfield(st, -2, "Get");
         return 1;
     });
     lua_setfield(L, -2, "GetCollectibles");
 
     lua_pushcfunction(L, [](lua_State *st) -> int {
         lua_newtable(st);
-        lua_pushinteger(st, 190); lua_setfield(st, -2, "Size");
-        lua_pushcfunction(st, PushDummyItemEntry); lua_setfield(st, -2, "Get");
+        lua_pushinteger(st, 189); lua_setfield(st, -2, "Size");
+        lua_pushcfunction(st, ItemConfig_GetTrinket); lua_setfield(st, -2, "Get");
         return 1;
     });
     lua_setfield(L, -2, "GetTrinkets");
 
     lua_pushcfunction(L, [](lua_State *st) -> int {
         lua_newtable(st);
-        lua_pushinteger(st, 90); lua_setfield(st, -2, "Size");
-        lua_pushcfunction(st, PushDummyItemEntry); lua_setfield(st, -2, "Get");
+        lua_pushinteger(st, 97); lua_setfield(st, -2, "Size");
+        lua_pushcfunction(st, ItemConfig_GetCard); lua_setfield(st, -2, "Get");
         return 1;
     });
     lua_setfield(L, -2, "GetCards");
 
-    lua_pushcfunction(L, PushDummyItemEntry); lua_setfield(L, -2, "GetCollectible");
-    lua_pushcfunction(L, PushDummyItemEntry); lua_setfield(L, -2, "GetTrinket");
-    lua_pushcfunction(L, PushDummyItemEntry); lua_setfield(L, -2, "GetCard");
-    lua_pushcfunction(L, PushDummyItemEntry); lua_setfield(L, -2, "GetPillEffect");
-    lua_pushcfunction(L, PushDummyItemEntry); lua_setfield(L, -2, "GetNullItem");
+    lua_pushcfunction(L, ItemConfig_GetCollectible); lua_setfield(L, -2, "GetCollectible");
+    lua_pushcfunction(L, ItemConfig_GetTrinket); lua_setfield(L, -2, "GetTrinket");
+    lua_pushcfunction(L, ItemConfig_GetCard); lua_setfield(L, -2, "GetCard");
+    lua_pushcfunction(L, ItemConfig_GetPillEffect); lua_setfield(L, -2, "GetPillEffect");
+    lua_pushcfunction(L, ItemConfig_GetNullItem); lua_setfield(L, -2, "GetNullItem");
     return 1;
 }
 
@@ -1346,9 +1423,7 @@ static int Isaac_GetTime(lua_State *L) {
 }
 
 static int Isaac_IsInGame(lua_State *L) {
-    uintptr_t p = RepogonGetPlayer(0);
-    uintptr_t r = RepogonGetRoom();
-    lua_pushboolean(L, (p != 0 && r != 0) ? 1 : 0);
+    lua_pushboolean(L, RepogonIsInRun() ? 1 : 0);
     return 1;
 }
 
@@ -2615,7 +2690,9 @@ void RepogonLuaDispatchUpdate(void) {
 void RepogonLuaDispatchRender(void) {
     RepogonOverlayClear();
     DispatchCallback(2, nullptr);   // MC_POST_RENDER (2)
-    DispatchCallback(100, nullptr); // MC_HUD_RENDER (100)
+    if (RepogonIsInRun()) {
+        DispatchCallback(100, nullptr); // MC_HUD_RENDER (100)
+    }
     RepogonOverlayFlush();
 }
 
