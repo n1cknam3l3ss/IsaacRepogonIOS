@@ -1,0 +1,5 @@
+_RepogonStart
+_RepogonTick
+_RepogonGetBaseAddress
+_RepogonIsSupportedBuild
+_RepogonVoidWatchdogTick

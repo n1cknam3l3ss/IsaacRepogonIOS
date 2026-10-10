@@ -1,0 +1,9 @@
+Package: com.nicknameless.isaacrepogon
+Name: Isaac REPENTOGON iOS
+Version: 1.0.0
+Architecture: iphoneos-arm64
+Description: REPENTOGON Lua Modding Runtime & Mod Loader for The Binding of Isaac on iOS. Loads mods from Documents/mods/.
+Maintainer: nicknameless
+Author: nicknameless
+Section: Tweaks
+Depends: mobilesubstrate (>= 0.9.5000)

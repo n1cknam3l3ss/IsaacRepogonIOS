@@ -1,0 +1,74 @@
+name: Build and Release
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          if ! command -v dpkg-deb >/dev/null 2>&1; then brew install dpkg; fi
+
+      - name: Build REPENTOGON iOS
+        run: make all
+
+      - name: Verify outputs
+        run: |
+          test -f build/IsaacRepogonIOS.dylib
+          test -f packages/IsaacRepogonIOS-rootless.deb
+          test -f packages/IsaacRepogonIOS-LiveContainer.framework.zip
+          test -f dist/IsaacRepogonIOS.zip
+          otool -L build/IsaacRepogonIOS.dylib
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: IsaacRepogonIOS-Build
+          path: |
+            build/IsaacRepogonIOS.dylib
+            packages/IsaacRepogonIOS-rootless.deb
+            packages/IsaacRepogonIOS-LiveContainer.framework.zip
+            dist/IsaacRepogonIOS.zip
+          retention-days: 30
+
+      - name: Create GitHub Release
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.0
+          name: "Isaac REPENTOGON iOS v1.0.0 (Phase 3 Lua Runtime Initial Release)"
+          body: |
+            ## Isaac REPENTOGON iOS (v1.0.0)
+
+            **Lua Modding Runtime & Script Loader for The Binding of Isaac on iOS**
+
+            ### Features:
+            - **Embedded Lua 5.3 Runtime**: Full Lua 5.3 engine running inside Isaac on iOS.
+            - **Mod Discovery**: Loads mods directly from `Documents/mods/<ModName>/main.lua`.
+            - **Auto-Starter Mod**: Initializes `Documents/mods/RepogonTest/main.lua` automatically.
+            - **ModCallbacks Engine**: Supports `MC_POST_UPDATE`, `MC_POST_RENDER`, `MC_POST_PEFFECT_UPDATE`, `MC_POST_NEW_ROOM`, `MC_POST_NEW_LEVEL`, `MC_POST_GAME_STARTED`, and more.
+            - **Isaac API**: `Isaac.DebugString`, `Isaac.GetPlayer`, `Isaac.GetRoom`, `Isaac.GetGame`, `Isaac.Spawn`, `Isaac.FindByType`, `Isaac.RenderText`, `Isaac.RenderScaledText`, `Vector`, `KColor`.
+            - **Screen Text Overlay**: Renders in-game mod text on iOS display with custom colors and scaling.
+            - **Logging**: Mod print statements and logs are recorded directly to `Documents/repogon_log.txt`.
+            - **Bonus**: Includes Rep+ guaranteed Void portals after Mega Satan, Mother, The Lamb, and ???.
+
+            ### Installation:
+            - **LiveContainer**: Import `IsaacRepogonIOS-LiveContainer.framework.zip`.
+            - **Sideloading / Azule**: Inject `IsaacRepogonIOS.dylib` into the IPA.
+            - **Jailbreak (Dopamine / Sileo)**: Install `IsaacRepogonIOS-rootless.deb`.
+          files: |
+            build/IsaacRepogonIOS.dylib
+            packages/IsaacRepogonIOS-rootless.deb
+            packages/IsaacRepogonIOS-LiveContainer.framework.zip
+            dist/IsaacRepogonIOS.zip
+          draft: false
+          prerelease: false
