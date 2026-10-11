@@ -566,6 +566,24 @@ static int Entity_SetColor(lua_State *L) {
     return 0;
 }
 
+static int Entity_GetVariant(lua_State *L) {
+    uintptr_t ent = CheckEntityPtr(L, 1);
+    lua_pushinteger(L, ent ? RepogonEntityGetVariant(ent) : 0);
+    return 1;
+}
+
+static int Entity_GetSubType(lua_State *L) {
+    uintptr_t ent = CheckEntityPtr(L, 1);
+    lua_pushinteger(L, ent ? RepogonEntityGetSubType(ent) : 0);
+    return 1;
+}
+
+static int Entity_GetType(lua_State *L) {
+    uintptr_t ent = CheckEntityPtr(L, 1);
+    lua_pushinteger(L, ent ? RepogonEntityGetType(ent) : 0);
+    return 1;
+}
+
 static int Entity_GetDropRNG(lua_State *L) {
     lua_newtable(L);
     lua_pushcfunction(L, [](lua_State *st) -> int { return 0; }); lua_setfield(L, -2, "SetSeed");
@@ -721,6 +739,14 @@ static int Player_index(lua_State *L) {
             lua_pushnumber(L, RepogonPlayerGetMoveSpeed(player)); return 1;
         } else if (strcmp(key, "ControllerIndex") == 0) {
             lua_pushinteger(L, 0); return 1;
+        } else if (strcmp(key, "MaxFireDelay") == 0) {
+            lua_pushnumber(L, 10.0); return 1;
+        } else if (strcmp(key, "ShotSpeed") == 0) {
+            lua_pushnumber(L, 1.0); return 1;
+        } else if (strcmp(key, "TearRange") == 0) {
+            lua_pushnumber(L, 260.0); return 1;
+        } else if (strcmp(key, "Luck") == 0) {
+            lua_pushnumber(L, 0.0); return 1;
         }
     }
 
@@ -1096,6 +1122,10 @@ static int Game_GetItemPool(lua_State *L) {
     lua_newtable(L);
     lua_pushcfunction(L, [](lua_State *st) -> int { lua_pushinteger(st, 1); return 1; }); lua_setfield(L, -2, "GetCollectible");
     lua_pushcfunction(L, [](lua_State *st) -> int { lua_newtable(st); return 1; }); lua_setfield(L, -2, "GetCollectiblesFromPool");
+    lua_pushcfunction(L, [](lua_State *st) -> int { lua_pushinteger(st, 0); return 1; }); lua_setfield(L, -2, "GetLastPool");
+    lua_pushcfunction(L, [](lua_State *st) -> int { lua_pushinteger(st, 0); return 1; }); lua_setfield(L, -2, "GetPoolForRoom");
+    lua_pushcfunction(L, [](lua_State *st) -> int { return 0; }); lua_setfield(L, -2, "ResetRoomBlacklist");
+    lua_pushcfunction(L, [](lua_State *st) -> int { return 0; }); lua_setfield(L, -2, "ResetTrinkets");
     return 1;
 }
 
@@ -1220,10 +1250,16 @@ static int Level_GetRoomByIdx(lua_State *L) {
 
 static int Level_GetRooms(lua_State *L) {
     lua_newtable(L);
-    lua_pushinteger(L, 1); lua_setfield(L, -2, "Size");
+    lua_pushinteger(L, 2); lua_setfield(L, -2, "Size");
     lua_pushcfunction(L, [](lua_State *st) -> int {
         int idx = static_cast<int>(luaL_optinteger(st, 2, 0));
         PushRoomDesc(st, idx);
+        if (idx == 1) {
+            lua_getfield(st, -1, "Data");
+            lua_pushinteger(st, 4); // ROOM_TREASURE (4)
+            lua_setfield(st, -2, "Type");
+            lua_pop(st, 1);
+        }
         return 1;
     });
     lua_setfield(L, -2, "Get");
@@ -2122,7 +2158,38 @@ CollectibleType = make_enum({
 TrinketType = make_enum({ TRINKET_NULL = 0, NUM_TRINKETS = 189 })
 Card = make_enum({ CARD_NULL = 0, NUM_CARDS = 90 })
 ItemPoolType = make_enum({ POOL_NULL = -1, POOL_TREASURE = 0 })
-RoomType = make_enum({ ROOM_NULL = 0, ROOM_DEFAULT = 1 })
+RoomType = make_enum({
+    ROOM_NULL = 0,
+    ROOM_DEFAULT = 1,
+    ROOM_SHOP = 2,
+    ROOM_ERROR = 3,
+    ROOM_TREASURE = 4,
+    ROOM_BOSS = 5,
+    ROOM_MINIBOSS = 6,
+    ROOM_SECRET = 7,
+    ROOM_SUPERSECRET = 8,
+    ROOM_ARCADE = 9,
+    ROOM_CURSE = 10,
+    ROOM_CHALLENGE = 11,
+    ROOM_LIBRARY = 12,
+    ROOM_SACRIFICE = 13,
+    ROOM_DEVIL = 14,
+    ROOM_ANGEL = 15,
+    ROOM_DUNGEON = 16,
+    ROOM_BOSSRUSH = 17,
+    ROOM_ISAACS = 18,
+    ROOM_BARREN = 19,
+    ROOM_CHEST = 20,
+    ROOM_DICE = 21,
+    ROOM_BLACK_MARKET = 22,
+    ROOM_GREED_EXIT = 23,
+    ROOM_PLANETARIUM = 24,
+    ROOM_TELEPORTER = 25,
+    ROOM_TELEPORTER_EXIT = 26,
+    ROOM_SECRET_EXIT = 27,
+    ROOM_BLUE = 28,
+    ROOM_ULTRASECRET = 29
+})
 RoomShape = make_enum({ ROOMSHAPE_1x1 = 1 })
 DoorSlot = make_enum({ NO_DOOR_SLOT = -1 })
 DoorState = make_enum({
@@ -2243,7 +2310,7 @@ TearFlag = make_enum({
 })
 TearVariant = make_enum({ BLUE = 0 })
 BombVariant = make_enum({ BOMB_NORMAL = 0 })
-BabySubType = make_enum({ BABY_UNASSIGNED = 0 })
+BabySubType = make_enum({ BABY_UNASSIGNED = -1, UNASSIGNED = -1 })
 PlayerType = make_enum({
     PLAYER_ISAAC = 0,
     PLAYER_MAGDALENE = 1,
@@ -2308,6 +2375,18 @@ GridEntityType = make_enum({})
 SortingLayer = make_enum({})
 Dimension = make_enum({})
 SeedEffect = make_enum({})
+Difficulty = make_enum({
+    DIFFICULTY_NORMAL = 0,
+    DIFFICULTY_HARD = 1,
+    DIFFICULTY_GREED = 2,
+    DIFFICULTY_GREEDIER = 3
+})
+GameStateFlag = make_enum({
+    STATE_FAMINE_SPAWNED = 0,
+    STATE_PESTILENCE_SPAWNED = 1,
+    STATE_WAR_SPAWNED = 2,
+    STATE_DEATH_SPAWNED = 3
+})
 Challenge = make_enum({ CHALLENGE_NULL = 0 })
 ItemType = make_enum({
     ITEM_NULL = 0,
@@ -2545,6 +2624,9 @@ Game = setmetatable({}, {
     lua_pushcfunction(g_L, Entity_GetDropRNG); lua_setfield(g_L, -2, "GetDropRNG");
     lua_pushcfunction(g_L, Entity_Kill); lua_setfield(g_L, -2, "Kill");
     lua_pushcfunction(g_L, Entity_Remove); lua_setfield(g_L, -2, "Remove");
+    lua_pushcfunction(g_L, Entity_GetVariant); lua_setfield(g_L, -2, "GetVariant");
+    lua_pushcfunction(g_L, Entity_GetSubType); lua_setfield(g_L, -2, "GetSubType");
+    lua_pushcfunction(g_L, Entity_GetType); lua_setfield(g_L, -2, "GetType");
     lua_pop(g_L, 1);
 
     // 3. IsaacPlayer
@@ -2609,6 +2691,9 @@ Game = setmetatable({}, {
     lua_pushcfunction(g_L, Entity_GetSprite); lua_setfield(g_L, -2, "GetSprite");
     lua_pushcfunction(g_L, Player_isMainPlayer); lua_setfield(g_L, -2, "isMainPlayer");
     lua_pushcfunction(g_L, Player_isMainPlayer); lua_setfield(g_L, -2, "IsMainPlayer");
+    lua_pushcfunction(g_L, Entity_GetVariant); lua_setfield(g_L, -2, "GetVariant");
+    lua_pushcfunction(g_L, Entity_GetSubType); lua_setfield(g_L, -2, "GetSubType");
+    lua_pushcfunction(g_L, Entity_GetType); lua_setfield(g_L, -2, "GetType");
     lua_pop(g_L, 1);
 
     // 3.5 IsaacPickup
@@ -2626,6 +2711,9 @@ Game = setmetatable({}, {
     lua_pushcfunction(g_L, Entity_SetColor); lua_setfield(g_L, -2, "SetColor");
     lua_pushcfunction(g_L, Entity_Kill); lua_setfield(g_L, -2, "Kill");
     lua_pushcfunction(g_L, Entity_Remove); lua_setfield(g_L, -2, "Remove");
+    lua_pushcfunction(g_L, Entity_GetVariant); lua_setfield(g_L, -2, "GetVariant");
+    lua_pushcfunction(g_L, Entity_GetSubType); lua_setfield(g_L, -2, "GetSubType");
+    lua_pushcfunction(g_L, Entity_GetType); lua_setfield(g_L, -2, "GetType");
     lua_pushcfunction(g_L, Pickup_IsShopItem); lua_setfield(g_L, -2, "IsShopItem");
     lua_pushcfunction(g_L, Pickup_IsBlind); lua_setfield(g_L, -2, "IsBlind");
     lua_pushcfunction(g_L, Pickup_GetCollectibleCycle); lua_setfield(g_L, -2, "GetCollectibleCycle");
@@ -2768,7 +2856,7 @@ Game = setmetatable({}, {
     lua_setglobal(g_L, "Isaac");
     lua_pushcfunction(g_L, Repogon_GetPtrHash); lua_setglobal(g_L, "GetPtrHash");
 
-    // ModCallbacks Table
+    // ModCallbacks Table — Standard Isaac API IDs
     lua_newtable(g_L);
     lua_pushinteger(g_L, 1); lua_setfield(g_L, -2, "MC_POST_UPDATE");
     lua_pushinteger(g_L, 2); lua_setfield(g_L, -2, "MC_POST_RENDER");
@@ -2778,23 +2866,45 @@ Game = setmetatable({}, {
     lua_pushinteger(g_L, 6); lua_setfield(g_L, -2, "MC_FAMILIAR_UPDATE");
     lua_pushinteger(g_L, 7); lua_setfield(g_L, -2, "MC_FAMILIAR_INIT");
     lua_pushinteger(g_L, 8); lua_setfield(g_L, -2, "MC_EVALUATE_CACHE");
+    lua_pushinteger(g_L, 9); lua_setfield(g_L, -2, "MC_POST_PLAYER_INIT");
     lua_pushinteger(g_L, 9); lua_setfield(g_L, -2, "MC_PLAYER_INIT");
     lua_pushinteger(g_L, 10); lua_setfield(g_L, -2, "MC_USE_PILL");
     lua_pushinteger(g_L, 11); lua_setfield(g_L, -2, "MC_ENTITY_TAKE_DMG");
-    lua_pushinteger(g_L, 20); lua_setfield(g_L, -2, "MC_POST_GAME_STARTED");
-    lua_pushinteger(g_L, 21); lua_setfield(g_L, -2, "MC_PRE_GAME_EXIT");
-    lua_pushinteger(g_L, 22); lua_setfield(g_L, -2, "MC_POST_NEW_ROOM");
-    lua_pushinteger(g_L, 23); lua_setfield(g_L, -2, "MC_POST_NEW_LEVEL");
-    lua_pushinteger(g_L, 28); lua_setfield(g_L, -2, "MC_POST_NPC_INIT");
-    lua_pushinteger(g_L, 29); lua_setfield(g_L, -2, "MC_POST_NPC_UPDATE");
+    lua_pushinteger(g_L, 12); lua_setfield(g_L, -2, "MC_POST_CURSE_EVAL");
+    lua_pushinteger(g_L, 13); lua_setfield(g_L, -2, "MC_INPUT_ACTION");
+    lua_pushinteger(g_L, 15); lua_setfield(g_L, -2, "MC_POST_GAME_STARTED");
+    lua_pushinteger(g_L, 16); lua_setfield(g_L, -2, "MC_POST_GAME_END");
+    lua_pushinteger(g_L, 17); lua_setfield(g_L, -2, "MC_PRE_GAME_EXIT");
+    lua_pushinteger(g_L, 18); lua_setfield(g_L, -2, "MC_POST_NEW_LEVEL");
+    lua_pushinteger(g_L, 19); lua_setfield(g_L, -2, "MC_POST_NEW_ROOM");
+    lua_pushinteger(g_L, 20); lua_setfield(g_L, -2, "MC_GET_CARD");
+    lua_pushinteger(g_L, 21); lua_setfield(g_L, -2, "MC_GET_SHADER_PARAMS");
+    lua_pushinteger(g_L, 22); lua_setfield(g_L, -2, "MC_EXECUTE_CMD");
+    lua_pushinteger(g_L, 23); lua_setfield(g_L, -2, "MC_PRE_USE_ITEM");
+    lua_pushinteger(g_L, 24); lua_setfield(g_L, -2, "MC_PRE_ENTITY_SPAWN");
+    lua_pushinteger(g_L, 25); lua_setfield(g_L, -2, "MC_POST_FAMILIAR_RENDER");
+    lua_pushinteger(g_L, 26); lua_setfield(g_L, -2, "MC_PRE_FAMILIAR_COLLISION");
+    lua_pushinteger(g_L, 27); lua_setfield(g_L, -2, "MC_POST_NPC_INIT");
+    lua_pushinteger(g_L, 28); lua_setfield(g_L, -2, "MC_POST_NPC_RENDER");
+    lua_pushinteger(g_L, 29); lua_setfield(g_L, -2, "MC_POST_NPC_DEATH");
+    lua_pushinteger(g_L, 30); lua_setfield(g_L, -2, "MC_PRE_NPC_COLLISION");
+    lua_pushinteger(g_L, 31); lua_setfield(g_L, -2, "MC_POST_PLAYER_UPDATE");
+    lua_pushinteger(g_L, 32); lua_setfield(g_L, -2, "MC_POST_PLAYER_RENDER");
+    lua_pushinteger(g_L, 33); lua_setfield(g_L, -2, "MC_PRE_PLAYER_COLLISION");
     lua_pushinteger(g_L, 34); lua_setfield(g_L, -2, "MC_POST_PICKUP_INIT");
     lua_pushinteger(g_L, 35); lua_setfield(g_L, -2, "MC_POST_PICKUP_UPDATE");
-    lua_pushinteger(g_L, 61); lua_setfield(g_L, -2, "MC_POST_PLAYER_INIT");
-    lua_pushinteger(g_L, 62); lua_setfield(g_L, -2, "MC_POST_PLAYER_UPDATE");
-    lua_pushinteger(g_L, 63); lua_setfield(g_L, -2, "MC_POST_PLAYER_RENDER");
-    lua_pushinteger(g_L, 64); lua_setfield(g_L, -2, "MC_PRE_ROOM_ENTITY_SPAWN");
-    lua_pushinteger(g_L, 67); lua_setfield(g_L, -2, "MC_POST_GET_COLLECTIBLE");
-    lua_pushinteger(g_L, 70); lua_setfield(g_L, -2, "MC_PRE_USE_ITEM");
+    lua_pushinteger(g_L, 36); lua_setfield(g_L, -2, "MC_POST_PICKUP_RENDER");
+    lua_pushinteger(g_L, 61); lua_setfield(g_L, -2, "MC_POST_FIRE_TEAR");
+    lua_pushinteger(g_L, 62); lua_setfield(g_L, -2, "MC_PRE_GET_COLLECTIBLE");
+    lua_pushinteger(g_L, 63); lua_setfield(g_L, -2, "MC_POST_GET_COLLECTIBLE");
+    lua_pushinteger(g_L, 64); lua_setfield(g_L, -2, "MC_GET_PILL_COLOR");
+    lua_pushinteger(g_L, 65); lua_setfield(g_L, -2, "MC_GET_PILL_EFFECT");
+    lua_pushinteger(g_L, 66); lua_setfield(g_L, -2, "MC_GET_TRINKET");
+    lua_pushinteger(g_L, 67); lua_setfield(g_L, -2, "MC_POST_ENTITY_REMOVE");
+    lua_pushinteger(g_L, 68); lua_setfield(g_L, -2, "MC_POST_ENTITY_KILL");
+    lua_pushinteger(g_L, 69); lua_setfield(g_L, -2, "MC_PRE_NPC_UPDATE");
+    lua_pushinteger(g_L, 70); lua_setfield(g_L, -2, "MC_PRE_SPAWN_CLEAR_AWARD");
+    lua_pushinteger(g_L, 71); lua_setfield(g_L, -2, "MC_PRE_ROOM_ENTITY_SPAWN");
     lua_pushinteger(g_L, 100); lua_setfield(g_L, -2, "MC_HUD_RENDER");
     lua_setglobal(g_L, "ModCallbacks");
 
@@ -2944,7 +3054,7 @@ void RepogonLuaDispatchUpdate(void) {
         uintptr_t p = RepogonGetPlayer(0);
         if (p) {
             g_playerInitFired = true;
-            DispatchCallback(61, [p](lua_State *L) { // MC_POST_PLAYER_INIT (61)
+            DispatchCallback(9, [p](lua_State *L) { // MC_POST_PLAYER_INIT (9)
                 PushPlayer(L, p);
             });
         }
@@ -2953,7 +3063,7 @@ void RepogonLuaDispatchUpdate(void) {
     // 1. MC_POST_UPDATE (1)
     DispatchCallback(1, nullptr);
 
-    // 2. MC_POST_PEFFECT_UPDATE (4) and MC_POST_PLAYER_UPDATE (62) for each player
+    // 2. MC_POST_PEFFECT_UPDATE (4) and MC_POST_PLAYER_UPDATE (31) for each player
     size_t entCount = RepogonGetEntityCount();
     for (size_t i = 0; i < entCount; ++i) {
         uintptr_t ent = RepogonGetEntityAtIndex(i);
@@ -2961,7 +3071,7 @@ void RepogonLuaDispatchUpdate(void) {
             DispatchCallback(4, [ent](lua_State *L) { // MC_POST_PEFFECT_UPDATE (4)
                 PushPlayer(L, ent);
             });
-            DispatchCallback(62, [ent](lua_State *L) { // MC_POST_PLAYER_UPDATE (62)
+            DispatchCallback(31, [ent](lua_State *L) { // MC_POST_PLAYER_UPDATE (31)
                 PushPlayer(L, ent);
             });
         }
@@ -2978,23 +3088,23 @@ void RepogonLuaDispatchRender(void) {
 }
 
 void RepogonLuaDispatchNewRoom(void) {
-    DispatchCallback(22, nullptr); // MC_POST_NEW_ROOM (22)
+    DispatchCallback(19, nullptr); // MC_POST_NEW_ROOM (19)
 }
 
 void RepogonLuaDispatchNewLevel(void) {
-    DispatchCallback(23, nullptr); // MC_POST_NEW_LEVEL (23)
+    DispatchCallback(18, nullptr); // MC_POST_NEW_LEVEL (18)
 }
 
 void RepogonLuaDispatchGameStarted(bool isContinued) {
     g_playerInitFired = false;
-    DispatchCallback(20, [isContinued](lua_State *L) { // MC_POST_GAME_STARTED (20)
+    DispatchCallback(15, [isContinued](lua_State *L) { // MC_POST_GAME_STARTED (15)
         lua_pushboolean(L, isContinued ? 1 : 0);
     });
 
     uintptr_t p = RepogonGetPlayer(0);
     if (p) {
         g_playerInitFired = true;
-        DispatchCallback(61, [p](lua_State *L) { // MC_POST_PLAYER_INIT (61)
+        DispatchCallback(9, [p](lua_State *L) { // MC_POST_PLAYER_INIT (9)
             PushPlayer(L, p);
         });
     }
@@ -3002,7 +3112,7 @@ void RepogonLuaDispatchGameStarted(bool isContinued) {
 
 void RepogonLuaDispatchGameExit(bool shouldSave) {
     g_playerInitFired = false;
-    DispatchCallback(21, [shouldSave](lua_State *L) { // MC_PRE_GAME_EXIT (21)
+    DispatchCallback(17, [shouldSave](lua_State *L) { // MC_PRE_GAME_EXIT (17)
         lua_pushboolean(L, shouldSave ? 1 : 0);
     });
 }
