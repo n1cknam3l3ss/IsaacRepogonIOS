@@ -151,11 +151,20 @@ void RepogonModManagerScanAndLoadMods(void) {
         if ([item isEqualToString:@"ExternalItemDescriptions"] || [mainLuaPath containsString:@"ExternalItemDescriptions"]) {
             NSString *cfgPath = [modPath stringByAppendingPathComponent:@"eid_config.lua"];
             NSString *cfgSrc = [NSString stringWithContentsOfFile:cfgPath encoding:NSUTF8StringEncoding error:nil];
-            if (cfgSrc && [cfgSrc containsString:@"[\"XPosition\"] = 60"]) {
-                cfgSrc = [cfgSrc stringByReplacingOccurrencesOfString:@"[\"XPosition\"] = 60"
-                                                           withString:@"[\"XPosition\"] = 150 -- auto-patched for iOS room center"];
+            bool cfgChanged = false;
+            if (cfgSrc && [cfgSrc containsString:@"[\"XPosition\"] = 150 -- auto-patched for iOS room center,"]) {
+                cfgSrc = [cfgSrc stringByReplacingOccurrencesOfString:@"[\"XPosition\"] = 150 -- auto-patched for iOS room center,"
+                                                           withString:@"[\"XPosition\"] = 150,"];
+                cfgChanged = true;
+            }
+            if (cfgSrc && [cfgSrc containsString:@"[\"XPosition\"] = 60,"]) {
+                cfgSrc = [cfgSrc stringByReplacingOccurrencesOfString:@"[\"XPosition\"] = 60,"
+                                                           withString:@"[\"XPosition\"] = 150,"];
+                cfgChanged = true;
+            }
+            if (cfgSrc && cfgChanged) {
                 [cfgSrc writeToFile:cfgPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
-                RepogonLog(@"Auto-patched ExternalItemDescriptions XPosition to 150.");
+                RepogonLog(@"Auto-patched ExternalItemDescriptions XPosition to 150 cleanly.");
             }
         }
 
