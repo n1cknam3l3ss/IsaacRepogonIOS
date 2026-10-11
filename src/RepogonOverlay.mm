@@ -16,7 +16,7 @@ struct TextDrawCommand {
     float a;
 
     bool isEqual(const TextDrawCommand &o) const {
-        return fabsf(x - o.x) < 0.1f && fabsf(y - o.y) < 0.1f &&
+        return fabsf(x - o.x) < 0.5f && fabsf(y - o.y) < 0.5f &&
                fabsf(sx - o.sx) < 0.01f && fabsf(sy - o.sy) < 0.01f &&
                fabsf(r - o.r) < 0.05f && fabsf(g - o.g) < 0.05f &&
                fabsf(b - o.b) < 0.05f && fabsf(a - o.a) < 0.05f &&
@@ -25,25 +25,46 @@ struct TextDrawCommand {
 };
 
 @interface RepogonOverlayView : UIView
+@property (nonatomic, strong) NSMutableArray<UILabel *> *labelPool;
 @property (nonatomic, assign) std::vector<TextDrawCommand> commands;
+- (void)updateCommands:(const std::vector<TextDrawCommand> &)cmds;
 @end
 
 @implementation RepogonOverlayView
+
+- (instancetype)initWithFrame:(CGRect)frame {
+    self = [super initWithFrame:frame];
+    if (self) {
+        _labelPool = [[NSMutableArray alloc] init];
+    }
+    return self;
+}
 
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
     return nil; // Passthrough to game controls
 }
 
-- (void)drawRect:(CGRect)rect {
-    CGContextRef ctx = UIGraphicsGetCurrentContext();
-    if (!ctx) return;
+- (void)updateCommands:(const std::vector<TextDrawCommand> &)cmds {
+    if (self.commands.size() == cmds.size()) {
+        bool identical = true;
+        for (size_t i = 0; i < cmds.size(); ++i) {
+            if (!self.commands[i].isEqual(cmds[i])) {
+                identical = false;
+                break;
+            }
+        }
+        if (identical) {
+            return; // 0% CPU overhead when overlay text is unchanged
+        }
+    }
+
+    self.commands = cmds;
 
     CGFloat viewW = self.bounds.size.width;
     CGFloat viewH = self.bounds.size.height;
     if (viewW <= 0 || viewH <= 0) return;
 
     // Isaac's virtual resolution is 480 x 270 (16:9 aspect ratio)
-    const CGFloat kVirtualW = 480.0f;
     const CGFloat kVirtualH = 270.0f;
     const CGFloat kTargetAspect = 16.0f / 9.0f;
 
@@ -54,12 +75,10 @@ struct TextDrawCommand {
     CGFloat offsetY = 0.0f;
 
     if (currentAspect > kTargetAspect) {
-        // Screen is wider than 16:9 (pillarbox black bars on left and right)
         gameH = viewH;
         gameW = gameH * kTargetAspect;
         offsetX = (viewW - gameW) * 0.5f;
     } else {
-        // Screen is taller than 16:9 (letterbox black bars on top and bottom)
         gameW = viewW;
         gameH = gameW / kTargetAspect;
         offsetY = (viewH - gameH) * 0.5f;
@@ -67,42 +86,49 @@ struct TextDrawCommand {
 
     CGFloat scale = gameH / kVirtualH;
 
-    for (const auto &cmd : self.commands) {
+    for (size_t i = 0; i < cmds.size(); ++i) {
+        const auto &cmd = cmds[i];
         if (!cmd.text || cmd.text.length == 0) continue;
 
-        // Map virtual Isaac (480x270) coordinates to screen viewport
+        UILabel *lbl = nil;
+        if (i < self.labelPool.count) {
+            lbl = self.labelPool[i];
+        } else {
+            lbl = [[UILabel alloc] init];
+            lbl.userInteractionEnabled = NO;
+            lbl.layer.masksToBounds = YES;
+            lbl.layer.cornerRadius = 2.0f;
+            lbl.textAlignment = NSTextAlignmentLeft;
+            [self addSubview:lbl];
+            [self.labelPool addObject:lbl];
+        }
+
         CGFloat screenX = offsetX + (cmd.x * scale);
         CGFloat screenY = offsetY + (cmd.y * scale);
 
+        // Compact font size: 5.2f gives clean ~8.3pt pixel font proportion on Retina display
         CGFloat fontScale = (cmd.sy > 0.0f ? cmd.sy : 1.0f);
-        CGFloat fontSize = 8.0f * scale * fontScale;
+        CGFloat fontSize = 5.2f * scale * fontScale;
         UIFont *font = [UIFont fontWithName:@"Courier-Bold" size:fontSize];
         if (!font) font = [UIFont monospacedSystemFontOfSize:fontSize weight:UIFontWeightBold];
 
-        CGPoint pt = CGPointMake(screenX, screenY);
+        lbl.font = font;
+        lbl.text = cmd.text;
+        lbl.textColor = [UIColor colorWithRed:cmd.r green:cmd.g blue:cmd.b alpha:cmd.a];
+        lbl.shadowColor = [UIColor colorWithWhite:0.0f alpha:MIN(cmd.a * 0.9f, 0.9f)];
+        lbl.shadowOffset = CGSizeMake(1.0f, 1.0f);
+        lbl.backgroundColor = [UIColor colorWithWhite:0.0f alpha:MIN(cmd.a * 0.65f, 0.75f)];
 
-        // Subtle dark translucent rounded badge behind text for clean in-game HUD look
         CGSize textSize = [cmd.text sizeWithAttributes:@{ NSFontAttributeName: font }];
-        CGRect bgRect = CGRectMake(pt.x - 2.0f, pt.y - 1.0f, textSize.width + 4.0f, textSize.height + 2.0f);
-        UIBezierPath *path = [UIBezierPath bezierPathWithRoundedRect:bgRect cornerRadius:3.0f];
-        [[UIColor colorWithWhite:0.0f alpha:MIN(cmd.a * 0.65f, 0.75f)] setFill];
-        [path fill];
+        lbl.frame = CGRectMake(roundf(screenX - 1.0f), roundf(screenY - 0.5f), ceilf(textSize.width + 3.0f), ceilf(textSize.height + 1.0f));
+        lbl.hidden = NO;
+    }
 
-        // 1px black outline / drop shadow for crisp readability
-        UIColor *shadowColor = [UIColor colorWithWhite:0.0f alpha:MIN(cmd.a, 0.9f)];
-        NSDictionary *shadowAttrs = @{
-            NSFontAttributeName: font,
-            NSForegroundColorAttributeName: shadowColor
-        };
-        [cmd.text drawAtPoint:CGPointMake(pt.x + 1.0f, pt.y + 1.0f) withAttributes:shadowAttrs];
-
-        UIColor *color = [UIColor colorWithRed:cmd.r green:cmd.g blue:cmd.b alpha:cmd.a];
-        NSDictionary *attrs = @{
-            NSFontAttributeName: font,
-            NSForegroundColorAttributeName: color
-        };
-
-        [cmd.text drawAtPoint:pt withAttributes:attrs];
+    // Hide any unused pooled labels
+    for (size_t i = cmds.size(); i < self.labelPool.count; ++i) {
+        if (!self.labelPool[i].hidden) {
+            self.labelPool[i].hidden = YES;
+        }
     }
 }
 
@@ -129,7 +155,7 @@ void RepogonOverlayInit(void) {
             g_overlayView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
             [window addSubview:g_overlayView];
             [window bringSubviewToFront:g_overlayView];
-            RepogonLog(@"RepogonOverlayView initialized and attached to key window.");
+            RepogonLog(@"RepogonOverlayView initialized and attached with GPU CALayer acceleration.");
         }
     });
 }
@@ -171,26 +197,18 @@ void RepogonOverlayFlush(void) {
         return;
     }
 
-    dispatch_async(dispatch_get_main_queue(), ^{
+    auto applyBlock = ^{
         if (!g_overlayView) {
             RepogonOverlayInit();
         }
         if (g_overlayView) {
-            // Check if commands are identical to existing view commands
-            if (g_overlayView.commands.size() == cmds.size()) {
-                bool identical = true;
-                for (size_t i = 0; i < cmds.size(); ++i) {
-                    if (!g_overlayView.commands[i].isEqual(cmds[i])) {
-                        identical = false;
-                        break;
-                    }
-                }
-                if (identical) {
-                    return; // 0% CPU! Commands unchanged, skip redraw
-                }
-            }
-            g_overlayView.commands = std::move(cmds);
-            [g_overlayView setNeedsDisplay];
+            [g_overlayView updateCommands:cmds];
         }
-    });
+    };
+
+    if ([NSThread isMainThread]) {
+        applyBlock();
+    } else {
+        dispatch_async(dispatch_get_main_queue(), applyBlock);
+    }
 }

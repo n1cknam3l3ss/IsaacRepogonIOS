@@ -41,11 +41,11 @@ jobs:
           retention-days: 30
 
       - name: Create GitHub Release
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.1.1
-          name: "Isaac REPENTOGON iOS v1.1.1 (JSON, Include & Workshop Compatibility)"
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v1.2.5' }}
+          name: "Isaac REPENTOGON iOS ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v1.2.5' }} (GPU Overlay, EID Optimization & Zero-Lag Fixes)"
           body: |
             ## Isaac REPENTOGON iOS (v1.1.0)
 

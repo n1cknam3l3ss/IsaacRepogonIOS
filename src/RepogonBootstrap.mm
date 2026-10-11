@@ -130,8 +130,13 @@ void RepogonStart(void) {
         dispatch_async(dispatch_get_main_queue(), ^{
             g_tickTarget = [[RepogonTickTarget alloc] init];
             g_displayLink = [CADisplayLink displayLinkWithTarget:g_tickTarget selector:@selector(onFrameTick:)];
+            if (@available(iOS 15.0, *)) {
+                g_displayLink.preferredFrameRateRange = CAFrameRateRangeMake(60, 60, 60);
+            } else {
+                g_displayLink.preferredFramesPerSecond = 60;
+            }
             [g_displayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
-            RepogonLog(@"REPENTOGON iOS is fully active and running!");
+            RepogonLog(@"REPENTOGON iOS is fully active and running (locked 60 FPS CADisplayLink)!");
         });
     });
 }

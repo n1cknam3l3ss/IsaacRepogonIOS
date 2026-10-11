@@ -147,24 +147,36 @@ void RepogonModManagerScanAndLoadMods(void) {
             }
         }
 
-        // Auto-patch ExternalItemDescriptions to prevent overlapping FoundHUD and counters
+        // Auto-patch ExternalItemDescriptions for optimal iOS HUD placement (smaller and to the left)
         if ([item isEqualToString:@"ExternalItemDescriptions"] || [mainLuaPath containsString:@"ExternalItemDescriptions"]) {
             NSString *cfgPath = [modPath stringByAppendingPathComponent:@"eid_config.lua"];
             NSString *cfgSrc = [NSString stringWithContentsOfFile:cfgPath encoding:NSUTF8StringEncoding error:nil];
             bool cfgChanged = false;
-            if (cfgSrc && [cfgSrc containsString:@"[\"XPosition\"] = 150 -- auto-patched for iOS room center,"]) {
-                cfgSrc = [cfgSrc stringByReplacingOccurrencesOfString:@"[\"XPosition\"] = 150 -- auto-patched for iOS room center,"
-                                                           withString:@"[\"XPosition\"] = 150,"];
-                cfgChanged = true;
-            }
-            if (cfgSrc && [cfgSrc containsString:@"[\"XPosition\"] = 60,"]) {
-                cfgSrc = [cfgSrc stringByReplacingOccurrencesOfString:@"[\"XPosition\"] = 60,"
-                                                           withString:@"[\"XPosition\"] = 150,"];
-                cfgChanged = true;
-            }
-            if (cfgSrc && cfgChanged) {
-                [cfgSrc writeToFile:cfgPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
-                RepogonLog(@"Auto-patched ExternalItemDescriptions XPosition to 150 cleanly.");
+            if (cfgSrc) {
+                if ([cfgSrc containsString:@"[\"XPosition\"] = 150,"]) {
+                    cfgSrc = [cfgSrc stringByReplacingOccurrencesOfString:@"[\"XPosition\"] = 150," withString:@"[\"XPosition\"] = 65,"];
+                    cfgChanged = true;
+                }
+                if ([cfgSrc containsString:@"[\"XPosition\"] = 60,"]) {
+                    cfgSrc = [cfgSrc stringByReplacingOccurrencesOfString:@"[\"XPosition\"] = 60," withString:@"[\"XPosition\"] = 65,"];
+                    cfgChanged = true;
+                }
+                if ([cfgSrc containsString:@"[\"YPosition\"] = 45,"]) {
+                    cfgSrc = [cfgSrc stringByReplacingOccurrencesOfString:@"[\"YPosition\"] = 45," withString:@"[\"YPosition\"] = 35,"];
+                    cfgChanged = true;
+                }
+                if ([cfgSrc containsString:@"[\"Size\"] = 1,"]) {
+                    cfgSrc = [cfgSrc stringByReplacingOccurrencesOfString:@"[\"Size\"] = 1," withString:@"[\"Size\"] = 0.85,"];
+                    cfgChanged = true;
+                }
+                if ([cfgSrc containsString:@"[\"TextboxWidth\"] = 130,"]) {
+                    cfgSrc = [cfgSrc stringByReplacingOccurrencesOfString:@"[\"TextboxWidth\"] = 130," withString:@"[\"TextboxWidth\"] = 110,"];
+                    cfgChanged = true;
+                }
+                if (cfgChanged) {
+                    [cfgSrc writeToFile:cfgPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+                    RepogonLog(@"Auto-patched ExternalItemDescriptions: XPosition=65, YPosition=35, Size=0.85, TextboxWidth=110.");
+                }
             }
         }
 

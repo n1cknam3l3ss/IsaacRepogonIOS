@@ -116,6 +116,8 @@ uintptr_t RepogonGetEntityAtIndex(size_t index) {
     return ent;
 }
 
+static uintptr_t s_cachedPlayer0 = 0;
+
 uintptr_t RepogonGetPlayer(int index) {
     size_t count = RepogonGetEntityCount();
     int curIdx = 0;
@@ -123,18 +125,31 @@ uintptr_t RepogonGetPlayer(int index) {
         uintptr_t ent = RepogonGetEntityAtIndex(i);
         if (!ent) continue;
         if (RepogonEntityGetType(ent) == 1) { // Type 1 = Player
-            if (curIdx == index) return ent;
+            if (curIdx == index) {
+                if (index == 0) s_cachedPlayer0 = ent;
+                return ent;
+            }
             curIdx++;
         }
+    }
+    if (index == 0 && s_cachedPlayer0 != 0) {
+        return s_cachedPlayer0;
     }
     return 0;
 }
 
 std::vector<uintptr_t> RepogonFindEntities(int type, int variant, int subType) {
     std::vector<uintptr_t> res;
-    size_t count = RepogonGetEntityCount();
-    for (size_t i = 0; i < count; ++i) {
-        uintptr_t ent = RepogonGetEntityAtIndex(i);
+    uintptr_t room = RepogonGetRoom();
+    if (!room) return res;
+    uintptr_t arr = 0;
+    if (!SafeRead(room + kRoomEntitiesArrayOffset, arr) || !arr) return res;
+    int32_t count = 0;
+    if (!SafeRead(room + kRoomEntitiesCountOffset, count) || count <= 0 || count >= 4096) return res;
+
+    for (int32_t i = 0; i < count; ++i) {
+        uintptr_t ent = 0;
+        SafeRead(arr + i * sizeof(uintptr_t), ent);
         if (!ent) continue;
         if (type >= 0 && RepogonEntityGetType(ent) != type) continue;
         if (variant >= 0 && RepogonEntityGetVariant(ent) != variant) continue;

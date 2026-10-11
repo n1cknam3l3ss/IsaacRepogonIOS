@@ -1047,6 +1047,13 @@ static int Room_GetDoor(lua_State *L) {
     lua_pushcfunction(L, [](lua_State *st) -> int { lua_pushboolean(st, 0); return 1; }); lua_setfield(L, -2, "CanBlowUp");
     lua_pushcfunction(L, [](lua_State *st) -> int { return 0; }); lua_setfield(L, -2, "Open");
     lua_pushcfunction(L, [](lua_State *st) -> int { return 0; }); lua_setfield(L, -2, "Close");
+    lua_pushcfunction(L, [](lua_State *st) -> int { lua_pushinteger(st, 0); return 1; }); lua_setfield(L, -2, "GetVariant");
+    lua_pushcfunction(L, [](lua_State *st) -> int { lua_pushinteger(st, 0); return 1; }); lua_setfield(L, -2, "GetType");
+    lua_pushcfunction(L, [](lua_State *st) -> int { lua_pushinteger(st, 0); return 1; }); lua_setfield(L, -2, "GetSaveState");
+    lua_pushcfunction(L, Entity_GetSprite); lua_setfield(L, -2, "GetSprite");
+    lua_pushcfunction(L, [](lua_State *st) -> int { PushVector(st, 0.0f, 0.0f); return 1; }); lua_setfield(L, -2, "GetPosition");
+    lua_pushcfunction(L, [](lua_State *st) -> int { lua_pushinteger(st, 0); return 1; }); lua_setfield(L, -2, "CurrentRoomType");
+    lua_pushcfunction(L, [](lua_State *st) -> int { lua_pushinteger(st, 0); return 1; }); lua_setfield(L, -2, "TargetRoomType");
     return 1;
 }
 static int Room_RemoveDoor(lua_State *L) { return 0; }
@@ -1340,6 +1347,14 @@ static int Isaac_DebugString(lua_State *L) {
 static int Isaac_GetPlayer(lua_State *L) {
     int idx = static_cast<int>(luaL_optinteger(L, 1, 0));
     uintptr_t p = RepogonGetPlayer(idx);
+    if (!p && idx == 0) {
+        // Fallback: push safe dummy player object so Lua scripts never crash with attempt to index nil
+        uintptr_t *ud = reinterpret_cast<uintptr_t *>(lua_newuserdata(L, sizeof(uintptr_t)));
+        *ud = 0;
+        luaL_getmetatable(L, "IsaacPlayer");
+        lua_setmetatable(L, -2);
+        return 1;
+    }
     PushPlayer(L, p);
     return 1;
 }
@@ -2432,6 +2447,13 @@ SkinColor = make_enum({
     SKIN_GREY = 5
 })
 
+GridRooms = make_enum({
+    ROOM_SECRET_EXIT_IDX = -1,
+    ROOM_ROTGUT_DUNGEON1_IDX = -2,
+    ROOM_ROTGUT_DUNGEON2_IDX = -3,
+    ROOM_DEBUG_IDX = -4
+})
+
 Options = {
     Language = "en",
     FoundHUD = 1,
@@ -2880,6 +2902,7 @@ Game = setmetatable({}, {
 
     // ModCallbacks Table — Standard Isaac API IDs
     lua_newtable(g_L);
+    lua_pushinteger(g_L, 0); lua_setfield(g_L, -2, "MC_NPC_UPDATE");
     lua_pushinteger(g_L, 1); lua_setfield(g_L, -2, "MC_POST_UPDATE");
     lua_pushinteger(g_L, 2); lua_setfield(g_L, -2, "MC_POST_RENDER");
     lua_pushinteger(g_L, 3); lua_setfield(g_L, -2, "MC_USE_ITEM");
