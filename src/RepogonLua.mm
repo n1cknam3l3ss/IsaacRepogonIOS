@@ -341,7 +341,17 @@ static int Font_new(lua_State *L) {
 
     auto getWidth = [](lua_State *st) -> int {
         const char *txt = luaL_optstring(st, 2, "");
-        lua_pushnumber(st, strlen(txt) * 6.0f);
+        if (!txt || !*txt) {
+            lua_pushnumber(st, 0.0);
+            return 1;
+        }
+        size_t charCount = 0;
+        const unsigned char *p = (const unsigned char *)txt;
+        while (*p) {
+            if ((*p & 0xC0) != 0x80) charCount++;
+            p++;
+        }
+        lua_pushnumber(st, static_cast<double>(charCount * 5.5f));
         return 1;
     };
     lua_pushcfunction(L, getWidth); lua_setfield(L, -2, "GetStringWidth");
@@ -383,7 +393,7 @@ static int Sprite_new(lua_State *L) {
         if (lua_isstring(st, -1)) {
             const char *anm = lua_tostring(st, -1);
             if (strstr(anm, "hudstats") || strstr(anm, "planetarium")) {
-                RepogonOverlayAddScaledText(@"[P]", pos.x, pos.y, 1.0f, 1.0f, 0.4f, 0.7f, 1.0f, 0.85f);
+                RepogonOverlayAddScaledText(@"🪐", pos.x, pos.y, 1.0f, 1.0f, 0.4f, 0.7f, 1.0f, 0.85f);
             }
         }
         lua_pop(st, 1);

@@ -46,7 +46,6 @@ static void CreateSampleModIfNeeded(NSString *modsDir) {
             @"    end\n"
             @"end\n\n"
             @"function mod:OnRender()\n"
-            @"    Isaac.RenderText(\"REPENTOGON iOS Active\", 40, 20, 0.2, 1.0, 0.4, 0.9)\n"
             @"end\n\n"
             @"mod:AddCallback(ModCallbacks.MC_POST_UPDATE, mod.OnUpdate)\n"
             @"mod:AddCallback(ModCallbacks.MC_POST_RENDER, mod.OnRender)\n";
@@ -124,14 +123,39 @@ void RepogonModManagerScanAndLoadMods(void) {
             continue;
         }
 
-        // Auto-patch PlanetariumChance to prevent it disabling itself under iOS REPENTOGON
+        // Auto-patch PlanetariumChance to align with FoundHUD and stay enabled
         if ([item isEqualToString:@"PlanetariumChance"] || [mainLuaPath containsString:@"PlanetariumChance"]) {
             NSString *src = [NSString stringWithContentsOfFile:mainLuaPath encoding:NSUTF8StringEncoding error:nil];
+            bool changed = false;
             if (src && [src containsString:@"self.storage.repentogonEnabled = true"]) {
                 src = [src stringByReplacingOccurrencesOfString:@"self.storage.repentogonEnabled = true"
                                                      withString:@"self.storage.repentogonEnabled = false -- auto-patched for iOS"];
+                changed = true;
+            }
+            if (src && [src containsString:@"self.coords = Vector(0, 170)"]) {
+                src = [src stringByReplacingOccurrencesOfString:@"self.coords = Vector(0, 170)"
+                                                     withString:@"self.coords = Vector(20, 170) -- auto-patched for iOS FoundHUD"];
+                changed = true;
+            } else if (src && [src containsString:@"self.coords = Vector(0, 168)"]) {
+                src = [src stringByReplacingOccurrencesOfString:@"self.coords = Vector(0, 168)"
+                                                     withString:@"self.coords = Vector(20, 168) -- auto-patched for iOS FoundHUD"];
+                changed = true;
+            }
+            if (src && changed) {
                 [src writeToFile:mainLuaPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
-                RepogonLog(@"Auto-patched PlanetariumChance to remain enabled under iOS REPENTOGON.");
+                RepogonLog(@"Auto-patched PlanetariumChance for iOS FoundHUD alignment.");
+            }
+        }
+
+        // Auto-patch ExternalItemDescriptions to prevent overlapping FoundHUD and counters
+        if ([item isEqualToString:@"ExternalItemDescriptions"] || [mainLuaPath containsString:@"ExternalItemDescriptions"]) {
+            NSString *cfgPath = [modPath stringByAppendingPathComponent:@"eid_config.lua"];
+            NSString *cfgSrc = [NSString stringWithContentsOfFile:cfgPath encoding:NSUTF8StringEncoding error:nil];
+            if (cfgSrc && [cfgSrc containsString:@"[\"XPosition\"] = 60"]) {
+                cfgSrc = [cfgSrc stringByReplacingOccurrencesOfString:@"[\"XPosition\"] = 60"
+                                                           withString:@"[\"XPosition\"] = 150 -- auto-patched for iOS room center"];
+                [cfgSrc writeToFile:cfgPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+                RepogonLog(@"Auto-patched ExternalItemDescriptions XPosition to 150.");
             }
         }
 

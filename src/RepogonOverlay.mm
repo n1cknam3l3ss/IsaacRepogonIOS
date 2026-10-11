@@ -14,6 +14,14 @@ struct TextDrawCommand {
     float g;
     float b;
     float a;
+
+    bool isEqual(const TextDrawCommand &o) const {
+        return fabsf(x - o.x) < 0.1f && fabsf(y - o.y) < 0.1f &&
+               fabsf(sx - o.sx) < 0.01f && fabsf(sy - o.sy) < 0.01f &&
+               fabsf(r - o.r) < 0.05f && fabsf(g - o.g) < 0.05f &&
+               fabsf(b - o.b) < 0.05f && fabsf(a - o.a) < 0.05f &&
+               (text == o.text || [text isEqualToString:o.text]);
+    }
 };
 
 @interface RepogonOverlayView : UIView
@@ -168,7 +176,20 @@ void RepogonOverlayFlush(void) {
             RepogonOverlayInit();
         }
         if (g_overlayView) {
-            g_overlayView.commands = cmds;
+            // Check if commands are identical to existing view commands
+            if (g_overlayView.commands.size() == cmds.size()) {
+                bool identical = true;
+                for (size_t i = 0; i < cmds.size(); ++i) {
+                    if (!g_overlayView.commands[i].isEqual(cmds[i])) {
+                        identical = false;
+                        break;
+                    }
+                }
+                if (identical) {
+                    return; // 0% CPU! Commands unchanged, skip redraw
+                }
+            }
+            g_overlayView.commands = std::move(cmds);
             [g_overlayView setNeedsDisplay];
         }
     });
