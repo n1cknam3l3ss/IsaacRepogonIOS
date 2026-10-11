@@ -30,17 +30,58 @@ struct TextDrawCommand {
     CGContextRef ctx = UIGraphicsGetCurrentContext();
     if (!ctx) return;
 
+    CGFloat viewW = self.bounds.size.width;
+    CGFloat viewH = self.bounds.size.height;
+    if (viewW <= 0 || viewH <= 0) return;
+
+    // Isaac's virtual resolution is 480 x 270 (16:9 aspect ratio)
+    const CGFloat kVirtualW = 480.0f;
+    const CGFloat kVirtualH = 270.0f;
+    const CGFloat kTargetAspect = 16.0f / 9.0f;
+
+    CGFloat currentAspect = viewW / viewH;
+    CGFloat gameW = viewW;
+    CGFloat gameH = viewH;
+    CGFloat offsetX = 0.0f;
+    CGFloat offsetY = 0.0f;
+
+    if (currentAspect > kTargetAspect) {
+        // Screen is wider than 16:9 (pillarbox black bars on left and right)
+        gameH = viewH;
+        gameW = gameH * kTargetAspect;
+        offsetX = (viewW - gameW) * 0.5f;
+    } else {
+        // Screen is taller than 16:9 (letterbox black bars on top and bottom)
+        gameW = viewW;
+        gameH = gameW / kTargetAspect;
+        offsetY = (viewH - gameH) * 0.5f;
+    }
+
+    CGFloat scale = gameH / kVirtualH;
+
     for (const auto &cmd : self.commands) {
         if (!cmd.text || cmd.text.length == 0) continue;
 
-        CGFloat fontSize = 12.0f * (cmd.sy > 0.0f ? cmd.sy : 1.0f);
+        // Map virtual Isaac (480x270) coordinates to screen viewport
+        CGFloat screenX = offsetX + (cmd.x * scale);
+        CGFloat screenY = offsetY + (cmd.y * scale);
+
+        CGFloat fontScale = (cmd.sy > 0.0f ? cmd.sy : 1.0f);
+        CGFloat fontSize = 8.0f * scale * fontScale;
         UIFont *font = [UIFont fontWithName:@"Courier-Bold" size:fontSize];
         if (!font) font = [UIFont monospacedSystemFontOfSize:fontSize weight:UIFontWeightBold];
 
-        CGPoint pt = CGPointMake(cmd.x, cmd.y);
+        CGPoint pt = CGPointMake(screenX, screenY);
 
-        // 1px black outline / drop shadow for crisp readability on any floor
-        UIColor *shadowColor = [UIColor colorWithWhite:0.0f alpha:MIN(cmd.a, 0.85f)];
+        // Subtle dark translucent rounded badge behind text for clean in-game HUD look
+        CGSize textSize = [cmd.text sizeWithAttributes:@{ NSFontAttributeName: font }];
+        CGRect bgRect = CGRectMake(pt.x - 2.0f, pt.y - 1.0f, textSize.width + 4.0f, textSize.height + 2.0f);
+        UIBezierPath *path = [UIBezierPath bezierPathWithRoundedRect:bgRect cornerRadius:3.0f];
+        [[UIColor colorWithWhite:0.0f alpha:MIN(cmd.a * 0.65f, 0.75f)] setFill];
+        [path fill];
+
+        // 1px black outline / drop shadow for crisp readability
+        UIColor *shadowColor = [UIColor colorWithWhite:0.0f alpha:MIN(cmd.a, 0.9f)];
         NSDictionary *shadowAttrs = @{
             NSFontAttributeName: font,
             NSForegroundColorAttributeName: shadowColor

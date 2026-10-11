@@ -162,10 +162,22 @@ static int Vector_sub(lua_State *L) {
 }
 
 static int Vector_mul(lua_State *L) {
-    Vector2f a = CheckVector(L, 1);
-    float scalar = static_cast<float>(luaL_checknumber(L, 2));
-    PushVector(L, a.x * scalar, a.y * scalar);
-    return 1;
+    if (lua_isnumber(L, 1)) {
+        float scalar = static_cast<float>(lua_tonumber(L, 1));
+        Vector2f b = CheckVector(L, 2);
+        PushVector(L, b.x * scalar, b.y * scalar);
+        return 1;
+    } else if (lua_isnumber(L, 2)) {
+        Vector2f a = CheckVector(L, 1);
+        float scalar = static_cast<float>(lua_tonumber(L, 2));
+        PushVector(L, a.x * scalar, a.y * scalar);
+        return 1;
+    } else {
+        Vector2f a = CheckVector(L, 1);
+        Vector2f b = CheckVector(L, 2);
+        PushVector(L, a.x * b.x, a.y * b.y);
+        return 1;
+    }
 }
 
 static int Vector_div(lua_State *L) {
