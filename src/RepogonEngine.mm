@@ -709,10 +709,6 @@ void RepogonRenderPlanetariumIcon(float x, float y) {
     // Frame 8 in gfx/ui/hudstats2.anm2 is the native Planetarium icon
     setFrame(reinterpret_cast<void *>(hudStats), 8);
 
-    // Set alpha to 0.5f matching FoundHUD
-    float alpha = 0.5f;
-    SafeWrite(hudStats + 0xF4, alpha);
-
     Vector2f pos = { x, y };
     Vector2f zero = { 0.0f, 0.0f };
     spriteRender(reinterpret_cast<void *>(hudStats), &pos, &zero, &zero);
@@ -729,27 +725,19 @@ float RepogonGetPlanetariumChance(void) {
     return chance;
 }
 
-static void RenderFPSOverlay(void) {
-    static uint32_t s_frameCount = 0;
-    static double s_lastTime = 0;
-    static float s_fps = 60.0f;
+static void RenderPlanetariumHUD(void) {
+    if (!RepogonIsInRun()) return;
 
-    s_frameCount++;
-    double now = CACurrentMediaTime();
-    if (s_lastTime == 0) s_lastTime = now;
-    double delta = now - s_lastTime;
-    if (delta >= 0.5) {
-        s_fps = static_cast<float>(s_frameCount / delta);
-        s_frameCount = 0;
-        s_lastTime = now;
-    }
+    // Slot 7 (Angel) is at y = 174. Slot 8 (Planetarium) is natively right underneath at y = 186.
+    float hudX = 20.0f;
+    float hudY = 186.0f;
 
-    char fpsBuf[32];
-    snprintf(fpsBuf, sizeof(fpsBuf), "FPS: %.0f", s_fps);
-    float r = (s_fps >= 50.0f) ? 0.3f : (s_fps >= 30.0f ? 1.0f : 1.0f);
-    float g = (s_fps >= 50.0f) ? 1.0f : (s_fps >= 30.0f ? 0.8f : 0.2f);
-    float b = 0.3f;
-    RepogonRenderTextNative(fpsBuf, 220.0f, 8.0f, r, g, b, 0.9f);
+    RepogonRenderPlanetariumIcon(hudX, hudY);
+
+    float chance = RepogonGetPlanetariumChance() * 100.0f;
+    char textBuf[16];
+    snprintf(textBuf, sizeof(textBuf), "%.1f%%", chance);
+    RepogonRenderScaledTextNative(textBuf, hudX + 16.0f, hudY, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 0.5f, 0);
 }
 
 static void RepogonHooked_IsaacShell_draw(id self, SEL _cmd, BOOL arg1) {
@@ -761,10 +749,10 @@ static void RepogonHooked_IsaacShell_draw(id self, SEL _cmd, BOOL arg1) {
     }
 
     // Isaac frame render is complete and OpenGL ES framebuffer is active in 2D screen coordinates!
-    // Dispatch Lua render callbacks (MC_POST_RENDER and MC_HUD_RENDER)
+    // Dispatch Lua render callbacks and native FoundHUD Planetarium:
     @autoreleasepool {
         RepogonLuaDispatchRender();
-        RenderFPSOverlay();
+        RenderPlanetariumHUD();
     }
 }
 
