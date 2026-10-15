@@ -1,5 +1,6 @@
 #import "RepogonLua.h"
 #import "RepogonEngine.h"
+#import "RepogonMemory.h"
 #import "RepogonLogger.h"
 #import "RepogonBootstrap.h"
 #import "RepogonXMLMerger.h"
@@ -340,7 +341,11 @@ static int Font_new(lua_State *L) {
         float y = static_cast<float>(luaL_optnumber(st, 4, 0));
         float r = 1.0f, g = 1.0f, b = 1.0f, a = 1.0f;
         ExtractColorFromLua(st, 5, r, g, b, a);
-        RepogonRenderTextNative(txt, x, y, r, g, b, a);
+        int fontType = 0;
+        lua_getfield(st, 1, "__font_type");
+        if (lua_isinteger(st, -1)) fontType = static_cast<int>(lua_tointeger(st, -1));
+        lua_pop(st, 1);
+        RepogonRenderScaledTextNative(txt, x, y, 1.0f, 1.0f, r, g, b, a, fontType);
         return 0;
     };
     lua_pushcfunction(L, drawStr); lua_setfield(L, -2, "DrawString");
@@ -376,6 +381,35 @@ static int Font_new(lua_State *L) {
     };
     lua_pushcfunction(L, getWidth); lua_setfield(L, -2, "GetStringWidth");
     lua_pushcfunction(L, getWidth); lua_setfield(L, -2, "GetStringWidthUTF8");
+
+    auto getCharWidth = [](lua_State *st) -> int {
+        std::string charText;
+        if (lua_isnumber(st, 2)) {
+            lua_Integer code = lua_tointeger(st, 2);
+            if (code > 0 && code < 128) {
+                charText.push_back(static_cast<char>(code));
+            }
+        } else if (lua_isstring(st, 2)) {
+            const char *s = lua_tostring(st, 2);
+            if (s) charText = s;
+        }
+        if (charText.empty()) {
+            lua_pushnumber(st, 0.0);
+            return 1;
+        }
+        int fontType = 0;
+        lua_getfield(st, 1, "__font_type");
+        if (lua_isinteger(st, -1)) fontType = static_cast<int>(lua_tointeger(st, -1));
+        lua_pop(st, 1);
+        int width = RepogonGetStringWidthNative(charText.c_str(), fontType);
+        if (width <= 0) {
+            width = (charText == " ") ? 4 : 6;
+        }
+        lua_pushnumber(st, static_cast<double>(width));
+        return 1;
+    };
+    lua_pushcfunction(L, getCharWidth); lua_setfield(L, -2, "GetCharacterWidth");
+    lua_pushcfunction(L, getCharWidth); lua_setfield(L, -2, "GetCharacterWidthUTF8");
 
     lua_pushcfunction(L, [](lua_State *st) -> int { return 0; });
     lua_setfield(L, -2, "SetMissingCharacter");
@@ -413,7 +447,7 @@ static int Sprite_new(lua_State *L) {
         if (lua_isstring(st, -1)) {
             const char *anm = lua_tostring(st, -1);
             if (strstr(anm, "hudstats") || strstr(anm, "planetarium")) {
-                RepogonRenderScaledTextNative("[P]", pos.x, pos.y, 1.0f, 1.0f, 0.4f, 0.7f, 1.0f, 0.85f, 0);
+                RepogonRenderPlanetariumIcon(pos.x, pos.y);
             }
         }
         lua_pop(st, 1);
@@ -1277,6 +1311,14 @@ static int Level_GetCurses(lua_State *L) {
 }
 
 static int Level_GetPlanetariumChance(lua_State *L) {
+    uintptr_t game = RepogonGetGame();
+    if (game) {
+        float chance = 0.0f;
+        if (SafeRead(game + 0x24BA4, chance)) {
+            lua_pushnumber(L, static_cast<lua_Number>(chance));
+            return 1;
+        }
+    }
     lua_pushnumber(L, 0.01);
     return 1;
 }

@@ -14,12 +14,15 @@ static void RepogonLogInitLocked(void) {
         NSString *docDir = paths.firstObject;
         if (docDir) {
             g_logFilePath = [docDir stringByAppendingPathComponent:@"repogon_log.txt"];
-            g_logFile = fopen([g_logFilePath UTF8String], "a");
+            NSDictionary *attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:g_logFilePath error:nil];
+            unsigned long long size = attrs ? [attrs fileSize] : 0;
+            const char *mode = (size > 200 * 1024) ? "w" : "a";
+            g_logFile = fopen([g_logFilePath UTF8String], mode);
             if (g_logFile) {
                 NSDateFormatter *df = [[NSDateFormatter alloc] init];
                 df.dateFormat = @"yyyy-MM-dd HH:mm:ss";
                 NSString *dateStr = [df stringFromDate:[NSDate date]];
-                fprintf(g_logFile, "\n=== Isaac REPENTOGON iOS Started: %s ===\n", [dateStr UTF8String]);
+                fprintf(g_logFile, "\n=== Isaac REPENTOGON iOS Started: %s (mode: %s) ===\n", [dateStr UTF8String], mode);
                 fflush(g_logFile);
             }
         }

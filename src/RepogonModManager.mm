@@ -147,6 +147,20 @@ void RepogonModManagerScanAndLoadMods(void) {
             }
         }
 
+        // Auto-patch StatsPlus to always be visible (on iOS there is no physical Tab/Map key held)
+        if ([item isEqualToString:@"StatsPlus"] || [mainLuaPath containsString:@"StatsPlus"]) {
+            NSString *cfgPath = [modPath stringByAppendingPathComponent:@"entities/config/Config.lua"];
+            NSString *cfgSrc = [NSString stringWithContentsOfFile:cfgPath encoding:NSUTF8StringEncoding error:nil];
+            if (cfgSrc && [cfgSrc containsString:@"MAP_BUTTON_HELD_CONDITION_ID"]) {
+                cfgSrc = [cfgSrc stringByReplacingOccurrencesOfString:@"MAP_BUTTON_HELD_CONDITION_ID"
+                                                           withString:@"ALWAYS_CONDITION_ID"];
+                cfgSrc = [cfgSrc stringByReplacingOccurrencesOfString:@"addon = ESSENTIALS_ADDON_ID, id = ALWAYS_CONDITION_ID"
+                                                           withString:@"addon = CORE_ADDON_ID, id = ALWAYS_CONDITION_ID"];
+                [cfgSrc writeToFile:cfgPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+                RepogonLog(@"Auto-patched StatsPlus Config.lua for iOS always-visible HUD.");
+            }
+        }
+
         // Auto-patch ExternalItemDescriptions for optimal iOS HUD placement (smaller and to the left)
         if ([item isEqualToString:@"ExternalItemDescriptions"] || [mainLuaPath containsString:@"ExternalItemDescriptions"]) {
             NSString *cfgPath = [modPath stringByAppendingPathComponent:@"eid_config.lua"];

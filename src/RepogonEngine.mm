@@ -544,11 +544,16 @@ uintptr_t RepogonGetFontByType(int type) {
     return 0;
 }
 
-// Character & String Sanitization to prevent KAGE Font::DrawStringScaled crashes on unsupported / non-ASCII UTF-8 chars
-static bool RepogonIsCharSupportedByFont(uintptr_t font, uint8_t ch) {
-    if (!font) return false;
-    // In KAGE Font::DrawStringScaled, char is sign-extended (sxtb): values >= 128 produce negative offsets!
-    if (ch >= 128 || ch < 32) return false;
+// Fast character & string sanitization with cached glyph tables to eliminate Mach kernel syscalls
+struct FontSupportedTable {
+    uintptr_t font;
+    bool supported[128];
+};
+static FontSupportedTable s_fontSupportedCache[8] = {};
+static int s_fontSupportedCount = 0;
+
+static bool RepogonCheckCharSupportedDirect(uintptr_t font, uint8_t ch) {
+    if (!font || ch >= 128 || ch < 32) return false;
 
     // Check character lookup table at font + 0x50
     uint16_t charIdx = 0;
@@ -589,6 +594,30 @@ static bool RepogonIsCharSupportedByFont(uintptr_t font, uint8_t ch) {
     }
 
     return true;
+}
+
+static bool RepogonIsCharSupportedByFont(uintptr_t font, uint8_t ch) {
+    if (!font || ch >= 128 || ch < 32) return false;
+
+    for (int i = 0; i < s_fontSupportedCount; ++i) {
+        if (s_fontSupportedCache[i].font == font) {
+            return s_fontSupportedCache[i].supported[ch];
+        }
+    }
+
+    int slot = -1;
+    if (s_fontSupportedCount < 8) {
+        slot = s_fontSupportedCount++;
+    } else {
+        slot = 0;
+    }
+
+    s_fontSupportedCache[slot].font = font;
+    for (uint8_t c = 0; c < 128; ++c) {
+        s_fontSupportedCache[slot].supported[c] = (c >= 32) ? RepogonCheckCharSupportedDirect(font, c) : false;
+    }
+
+    return s_fontSupportedCache[slot].supported[ch];
 }
 
 static std::string RepogonSanitizeString(uintptr_t font, const char *str) {
@@ -661,6 +690,31 @@ int32_t RepogonGetStringWidthNative(const char *text, int fontType) {
 
     auto widthFunc = reinterpret_cast<FontGetStringWidth_t>(base + kFontGetStringWidthRVA);
     return widthFunc(reinterpret_cast<void *>(font), safe.c_str());
+}
+
+void RepogonRenderPlanetariumIcon(float x, float y) {
+    uintptr_t base = RepogonGetBaseAddress();
+    if (!base) return;
+    uintptr_t gameRoot = 0;
+    if (!SafeRead(base + kGameRootGlobalRVA, gameRoot) || !gameRoot) return;
+    uintptr_t hudStats = gameRoot + 0xC59E8;
+
+    uintptr_t vtbl = 0;
+    if (!SafeRead(hudStats, vtbl) || !vtbl) return;
+
+    auto setFrame = reinterpret_cast<void (*)(void *, int)>(base + 0x89EB6C);
+    auto spriteRender = reinterpret_cast<void (*)(void *, Vector2f *, Vector2f *, Vector2f *)>(base + 0x89E4C0);
+
+    // Frame 8 in gfx/ui/hudstats2.anm2 is the native Planetarium icon
+    setFrame(reinterpret_cast<void *>(hudStats), 8);
+
+    // Set alpha to 0.5f matching FoundHUD
+    float alpha = 0.5f;
+    SafeWrite(hudStats + 0xF4, alpha);
+
+    Vector2f pos = { x, y };
+    Vector2f zero = { 0.0f, 0.0f };
+    spriteRender(reinterpret_cast<void *>(hudStats), &pos, &zero, &zero);
 }
 
 // In-Game Native Render Pipeline Hook & Performance Monitor
