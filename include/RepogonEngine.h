@@ -96,7 +96,6 @@ bool RepogonRenderTextNative(const char *text, float x, float y, float r, float 
 bool RepogonRenderScaledTextNative(const char *text, float x, float y, float sx, float sy, float r, float g, float b, float a, int fontType = 0);
 int32_t RepogonGetStringWidthNative(const char *text, int fontType = 0);
 void RepogonRenderPlanetariumIcon(float x, float y);
-void RepogonPatchFoundHUDPlanetarium(void);
 float RepogonGetPlanetariumChance(void);
 void RepogonRenderHookInit(void);
 

@@ -1122,7 +1122,6 @@ static int Player_ClearCostumes(lua_State *L) { return 0; }
 static int Player_UseActiveItem(lua_State *L) { return 0; }
 
 void PushPlayer(lua_State *L, uintptr_t player) {
-    if (!player) { lua_pushnil(L); return; }
     uintptr_t *ud = reinterpret_cast<uintptr_t *>(lua_newuserdata(L, sizeof(uintptr_t)));
     *ud = player;
     luaL_getmetatable(L, "IsaacPlayer");
