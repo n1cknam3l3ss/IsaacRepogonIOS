@@ -2,10 +2,13 @@
 #import "RepogonMemory.h"
 #import "RepogonLogger.h"
 #import "RepogonLua.h"
+#import "RepogonBootstrap.h"
 
 #import <mach-o/dyld.h>
 #import <mach-o/loader.h>
 #import <objc/runtime.h>
+#import <QuartzCore/QuartzCore.h>
+#include <string>
 
 namespace {
 
@@ -541,6 +544,73 @@ uintptr_t RepogonGetFontByType(int type) {
     return 0;
 }
 
+// Character & String Sanitization to prevent KAGE Font::DrawStringScaled crashes on unsupported / non-ASCII UTF-8 chars
+static bool RepogonIsCharSupportedByFont(uintptr_t font, uint8_t ch) {
+    if (!font) return false;
+    // In KAGE Font::DrawStringScaled, char is sign-extended (sxtb): values >= 128 produce negative offsets!
+    if (ch >= 128 || ch < 32) return false;
+
+    // Check character lookup table at font + 0x50
+    uint16_t charIdx = 0;
+    if (!SafeRead(font + 0x50 + (ch * 2), charIdx) || charIdx == 0xffff) {
+        return false;
+    }
+
+    uintptr_t charsArray = 0;
+    if (!SafeRead(font + 0x28, charsArray) || !charsArray) {
+        return false;
+    }
+
+    // FontCharBlock is 20 (0x14) bytes. Page index is at +0x12
+    uint8_t page = 0;
+    if (!SafeRead(charsArray + (charIdx * 20) + 0x12, page)) {
+        return false;
+    }
+
+    uint32_t numPages = 0;
+    if (!SafeRead(font + 0x40, numPages) || page >= numPages) {
+        return false;
+    }
+
+    uintptr_t texturesArray = 0;
+    if (!SafeRead(font + 0x48, texturesArray) || !texturesArray) {
+        return false;
+    }
+
+    // Textures array has 16 (0x10) bytes per entry: [texturesArray + page * 16]
+    uintptr_t tex = 0;
+    if (!SafeRead(texturesArray + (page * 16), tex) || !tex || tex == (uintptr_t)-1) {
+        return false;
+    }
+
+    uintptr_t vtable = 0;
+    if (!SafeRead(tex, vtable) || !vtable) {
+        return false;
+    }
+
+    return true;
+}
+
+static std::string RepogonSanitizeString(uintptr_t font, const char *str) {
+    if (!str) return "";
+    std::string clean;
+    clean.reserve(strlen(str));
+    for (const char *p = str; *p; ++p) {
+        uint8_t ch = static_cast<uint8_t>(*p);
+        if (ch == '\n' || ch == '\r' || ch == '\t') {
+            clean.push_back(*p);
+        } else if (ch == ' ') {
+            clean.push_back(' ');
+        } else if (ch < 128 && RepogonIsCharSupportedByFont(font, ch)) {
+            clean.push_back(*p);
+        } else {
+            // Replace non-ASCII / unsupported page chars with space to prevent sxtb negative lookup crash
+            clean.push_back(' ');
+        }
+    }
+    return clean;
+}
+
 bool RepogonRenderTextNative(const char *text, float x, float y, float r, float g, float b, float a) {
     if (!text || !*text) return false;
     uintptr_t base = RepogonGetBaseAddress();
@@ -554,9 +624,12 @@ bool RepogonRenderTextNative(const char *text, float x, float y, float r, float 
         return false;
     }
 
+    std::string safe = RepogonSanitizeString(font, text);
+    if (safe.empty()) return false;
+
     auto drawFunc = reinterpret_cast<FontDrawString_t>(base + kFontDrawStringRVA);
     KColor color = { r, g, b, a, 0, 0 };
-    drawFunc(reinterpret_cast<void *>(font), text, x, y, &color, 0, false);
+    drawFunc(reinterpret_cast<void *>(font), safe.c_str(), x, y, &color, 0, false);
     return true;
 }
 
@@ -567,9 +640,12 @@ bool RepogonRenderScaledTextNative(const char *text, float x, float y, float sx,
     uintptr_t font = RepogonGetFontByType(fontType);
     if (!font || !RepogonIsValidFont(font)) return false;
 
+    std::string safe = RepogonSanitizeString(font, text);
+    if (safe.empty()) return false;
+
     auto drawFunc = reinterpret_cast<FontDrawStringScaled_t>(base + kFontDrawStringScaledRVA);
     KColor color = { r, g, b, a, 0, 0 };
-    drawFunc(reinterpret_cast<void *>(font), text, x, y, sx, sy, &color, 0, false);
+    drawFunc(reinterpret_cast<void *>(font), safe.c_str(), x, y, sx, sy, &color, 0, false);
     return true;
 }
 
@@ -580,22 +656,71 @@ int32_t RepogonGetStringWidthNative(const char *text, int fontType) {
     uintptr_t font = RepogonGetFontByType(fontType);
     if (!font || !RepogonIsValidFont(font)) return 0;
 
+    std::string safe = RepogonSanitizeString(font, text);
+    if (safe.empty()) return 0;
+
     auto widthFunc = reinterpret_cast<FontGetStringWidth_t>(base + kFontGetStringWidthRVA);
-    return widthFunc(reinterpret_cast<void *>(font), text);
+    return widthFunc(reinterpret_cast<void *>(font), safe.c_str());
 }
 
-// Render Hook via -[IsaacShell draw:] Swizzling
+// In-Game Native Render Pipeline Hook & Performance Monitor
+typedef void (*IsaacRenderFunc_t)(void *context);
+static IsaacRenderFunc_t g_orig_IsaacRender = nullptr;
 static void (*g_orig_IsaacShell_draw)(id, SEL, BOOL) = nullptr;
 
-static void RepogonHooked_IsaacShell_draw(id self, SEL _cmd, BOOL arg1) {
-    if (g_orig_IsaacShell_draw) {
-        g_orig_IsaacShell_draw(self, _cmd, arg1);
+static void RenderFPSOverlay(void) {
+    static uint32_t s_frameCount = 0;
+    static double s_lastTime = 0;
+    static float s_fps = 60.0f;
+
+    s_frameCount++;
+    double now = CACurrentMediaTime();
+    if (s_lastTime == 0) s_lastTime = now;
+    double delta = now - s_lastTime;
+    if (delta >= 0.5) {
+        s_fps = static_cast<float>(s_frameCount / delta);
+        s_frameCount = 0;
+        s_lastTime = now;
     }
 
-    // Isaac frame render is complete and OpenGL ES framebuffer is active!
-    // Dispatch Lua render callbacks (MC_POST_RENDER and MC_HUD_RENDER)
+    char fpsBuf[32];
+    snprintf(fpsBuf, sizeof(fpsBuf), "FPS: %.0f", s_fps);
+    float r = (s_fps >= 50.0f) ? 0.3f : (s_fps >= 30.0f ? 1.0f : 1.0f);
+    float g = (s_fps >= 50.0f) ? 1.0f : (s_fps >= 30.0f ? 0.8f : 0.2f);
+    float b = 0.3f;
+    RepogonRenderTextNative(fpsBuf, 220.0f, 8.0f, r, g, b, 0.9f);
+}
+
+static void RepogonHooked_IsaacRender(void *context) {
+    // 1. Let Isaac finish rendering the room, entities, and native HUD
+    if (g_orig_IsaacRender) {
+        g_orig_IsaacRender(context);
+    }
+
+    // 2. We are now AT THE END of Isaac's render pass, BEFORE Present()!
+    //    Metal/GL framebuffer is open, bound, and in 2D screen coordinates.
+    //    Dispatch Lua render callbacks and FPS overlay:
     @autoreleasepool {
         RepogonLuaDispatchRender();
+        RenderFPSOverlay();
+    }
+}
+
+static void RepogonHooked_IsaacShell_draw(id self, SEL _cmd, BOOL arg1) {
+    // Hook the internal render callback [self + 0x58] on the IsaacShell instance
+    if (self) {
+        uintptr_t *pRenderFunc = reinterpret_cast<uintptr_t *>(reinterpret_cast<uintptr_t>(self) + 0x58);
+        if (*pRenderFunc && *pRenderFunc != reinterpret_cast<uintptr_t>(RepogonHooked_IsaacRender)) {
+            g_orig_IsaacRender = reinterpret_cast<IsaacRenderFunc_t>(*pRenderFunc);
+            *pRenderFunc = reinterpret_cast<uintptr_t>(RepogonHooked_IsaacRender);
+        }
+    }
+
+    // Tick game events in exact lockstep with Isaac's own frame
+    RepogonTick();
+
+    if (g_orig_IsaacShell_draw) {
+        g_orig_IsaacShell_draw(self, _cmd, arg1);
     }
 }
 
