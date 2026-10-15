@@ -1,7 +1,6 @@
 #import "RepogonLua.h"
 #import "RepogonEngine.h"
 #import "RepogonLogger.h"
-#import "RepogonOverlay.h"
 #import "RepogonBootstrap.h"
 #import "RepogonXMLMerger.h"
 #import "lua_json.h"
@@ -305,9 +304,31 @@ static void ExtractColorFromLua(lua_State *st, int idx, float &r, float &g, floa
 
 static int Font_new(lua_State *L) {
     lua_newtable(L);
-    // Method stubs
-    lua_pushcfunction(L, [](lua_State *st) -> int { lua_pushboolean(st, 1); return 1; });
-    lua_setfield(L, -2, "Load");
+    lua_pushinteger(L, 0); // 0 = default (PFTempestaSevenCondensed)
+    lua_setfield(L, -2, "__font_type");
+
+    auto loadFunc = [](lua_State *st) -> int {
+        const char *path = luaL_optstring(st, 2, "");
+        int type = 0;
+        if (path) {
+            std::string s(path);
+            for (auto &c : s) c = tolower(c);
+            if (s.find("upheaval") != std::string::npos) {
+                type = 1;
+            } else if (s.find("teammeat") != std::string::npos) {
+                type = 2;
+            } else if (s.find("12b") != std::string::npos) {
+                type = 3;
+            } else if (s.find("10r") != std::string::npos) {
+                type = 4;
+            }
+        }
+        lua_pushinteger(st, type);
+        lua_setfield(st, 1, "__font_type");
+        lua_pushboolean(st, 1);
+        return 1;
+    };
+    lua_pushcfunction(L, loadFunc); lua_setfield(L, -2, "Load");
     lua_pushcfunction(L, [](lua_State *st) -> int { lua_pushboolean(st, 1); return 1; });
     lua_setfield(L, -2, "IsLoaded");
     lua_pushcfunction(L, [](lua_State *st) -> int { lua_pushnumber(st, 12.0); return 1; });
@@ -319,7 +340,7 @@ static int Font_new(lua_State *L) {
         float y = static_cast<float>(luaL_optnumber(st, 4, 0));
         float r = 1.0f, g = 1.0f, b = 1.0f, a = 1.0f;
         ExtractColorFromLua(st, 5, r, g, b, a);
-        RepogonOverlayAddText([NSString stringWithUTF8String:txt], x, y, r, g, b, a);
+        RepogonRenderTextNative(txt, x, y, r, g, b, a);
         return 0;
     };
     lua_pushcfunction(L, drawStr); lua_setfield(L, -2, "DrawString");
@@ -333,7 +354,11 @@ static int Font_new(lua_State *L) {
         float sy = static_cast<float>(luaL_optnumber(st, 6, 1.0));
         float r = 1.0f, g = 1.0f, b = 1.0f, a = 1.0f;
         ExtractColorFromLua(st, 7, r, g, b, a);
-        RepogonOverlayAddScaledText([NSString stringWithUTF8String:txt], x, y, sx, sy, r, g, b, a);
+        int fontType = 0;
+        lua_getfield(st, 1, "__font_type");
+        if (lua_isinteger(st, -1)) fontType = static_cast<int>(lua_tointeger(st, -1));
+        lua_pop(st, 1);
+        RepogonRenderScaledTextNative(txt, x, y, sx, sy, r, g, b, a, fontType);
         return 0;
     };
     lua_pushcfunction(L, drawScaled); lua_setfield(L, -2, "DrawStringScaled");
@@ -341,17 +366,12 @@ static int Font_new(lua_State *L) {
 
     auto getWidth = [](lua_State *st) -> int {
         const char *txt = luaL_optstring(st, 2, "");
-        if (!txt || !*txt) {
-            lua_pushnumber(st, 0.0);
-            return 1;
-        }
-        size_t charCount = 0;
-        const unsigned char *p = (const unsigned char *)txt;
-        while (*p) {
-            if ((*p & 0xC0) != 0x80) charCount++;
-            p++;
-        }
-        lua_pushnumber(st, static_cast<double>(charCount * 5.5f));
+        int fontType = 0;
+        lua_getfield(st, 1, "__font_type");
+        if (lua_isinteger(st, -1)) fontType = static_cast<int>(lua_tointeger(st, -1));
+        lua_pop(st, 1);
+        int width = RepogonGetStringWidthNative(txt, fontType);
+        lua_pushnumber(st, static_cast<double>(width));
         return 1;
     };
     lua_pushcfunction(L, getWidth); lua_setfield(L, -2, "GetStringWidth");
@@ -393,7 +413,7 @@ static int Sprite_new(lua_State *L) {
         if (lua_isstring(st, -1)) {
             const char *anm = lua_tostring(st, -1);
             if (strstr(anm, "hudstats") || strstr(anm, "planetarium")) {
-                RepogonOverlayAddScaledText(@"🪐", pos.x, pos.y, 1.0f, 1.0f, 0.4f, 0.7f, 1.0f, 0.85f);
+                RepogonRenderScaledTextNative("[P]", pos.x, pos.y, 1.0f, 1.0f, 0.4f, 0.7f, 1.0f, 0.85f, 0);
             }
         }
         lua_pop(st, 1);
@@ -1414,7 +1434,7 @@ static int Isaac_RenderText(lua_State *L) {
     float g = static_cast<float>(luaL_optnumber(L, 5, 1.0));
     float b = static_cast<float>(luaL_optnumber(L, 6, 1.0));
     float a = static_cast<float>(luaL_optnumber(L, 7, 1.0));
-    RepogonOverlayAddText([NSString stringWithUTF8String:text], x, y, r, g, b, a);
+    RepogonRenderTextNative(text, x, y, r, g, b, a);
     return 0;
 }
 
@@ -1428,7 +1448,7 @@ static int Isaac_RenderScaledText(lua_State *L) {
     float g = static_cast<float>(luaL_optnumber(L, 7, 1.0));
     float b = static_cast<float>(luaL_optnumber(L, 8, 1.0));
     float a = static_cast<float>(luaL_optnumber(L, 9, 1.0));
-    RepogonOverlayAddScaledText([NSString stringWithUTF8String:text], x, y, sx, sy, r, g, b, a);
+    RepogonRenderScaledTextNative(text, x, y, sx, sy, r, g, b, a, 0);
     return 0;
 }
 
@@ -3124,12 +3144,10 @@ void RepogonLuaDispatchUpdate(void) {
 }
 
 void RepogonLuaDispatchRender(void) {
-    RepogonOverlayClear();
     DispatchCallback(2, nullptr);   // MC_POST_RENDER (2)
     if (RepogonIsInRun()) {
         DispatchCallback(100, nullptr); // MC_HUD_RENDER (100)
     }
-    RepogonOverlayFlush();
 }
 
 void RepogonLuaDispatchNewRoom(void) {

@@ -92,9 +92,6 @@ void RepogonTick(void) {
         // Guaranteed Void portal check
         RepogonVoidWatchdogTick();
     }
-
-    // Always run render pass (flushes overlay view; MC_POST_RENDER runs on menu, MC_HUD_RENDER is guarded by g_inRun inside)
-    RepogonLuaDispatchRender();
 }
 
 void RepogonStart(void) {
@@ -113,8 +110,8 @@ void RepogonStart(void) {
         // 1. Initialize Virtual File System & Asset Redirection
         RepogonVFSInit();
 
-        // 2. Initialize Screen Overlay
-        RepogonOverlayInit();
+        // 2. Initialize Native Render Hook (swizzles -[IsaacShell draw:])
+        RepogonRenderHookInit();
 
         // 3. Initialize Lua 5.3 runtime
         if (!RepogonLuaInit()) {
@@ -136,13 +133,14 @@ void RepogonStart(void) {
                 g_displayLink.preferredFramesPerSecond = 60;
             }
             [g_displayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
-            RepogonLog(@"REPENTOGON iOS is fully active and running (locked 60 FPS CADisplayLink)!");
+            RepogonLog(@"REPENTOGON iOS is fully active and running (native KAGE in-game rendering)!");
         });
     });
 }
 
 __attribute__((constructor)) static void RepogonConstructor(void) {
     @autoreleasepool {
+        RepogonRenderHookInit();
         dispatch_async(dispatch_get_main_queue(), ^{
             NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
             [center addObserverForName:UIApplicationDidBecomeActiveNotification

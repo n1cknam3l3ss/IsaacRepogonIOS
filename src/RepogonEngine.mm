@@ -1,9 +1,11 @@
 #import "RepogonEngine.h"
 #import "RepogonMemory.h"
 #import "RepogonLogger.h"
+#import "RepogonLua.h"
 
 #import <mach-o/dyld.h>
 #import <mach-o/loader.h>
+#import <objc/runtime.h>
 
 namespace {
 
@@ -12,6 +14,17 @@ constexpr const char *kSupportedUUID = "F4357753-A25F-30EE-BACF-63709F902895";
 constexpr uintptr_t kGameGlobalRVA = 0xAC3B90;
 constexpr size_t kGameCurrentRoomOffset = 0x21550;
 constexpr size_t kGameFrameCountOffset = 0x1CF42C;
+
+constexpr uintptr_t kManagerGlobalRVA = 0xAC2428;
+constexpr size_t kManagerFontMPlus12Offset = 0x600;
+constexpr size_t kManagerFontMPlus10Offset = 0x20650;
+constexpr size_t kManagerFontTempestaOffset = 0x80740;
+constexpr size_t kManagerFontUpheavalOffset = 0xa0790;
+constexpr size_t kManagerFontTeamMeatOffset = 0xc07e0;
+
+constexpr uintptr_t kFontGetStringWidthRVA = 0x8BDEC4;
+constexpr uintptr_t kFontDrawStringRVA = 0x8BE324;
+constexpr uintptr_t kFontDrawStringScaledRVA = 0x8BE0C4;
 
 constexpr size_t kRoomDescriptorOffset = 0x8;
 constexpr size_t kRoomDescriptorDataOffset = 0x10;
@@ -28,6 +41,9 @@ constexpr uintptr_t kGameSpawnEntityRVA = 0x88FCBC;
 typedef Vector2f (*GetCenterPos_t)(void *room);
 typedef int32_t (*GetGridIndex_t)(void *room, const Vector2f *pos);
 typedef void* (*GameSpawn_t)(void *game, int32_t type, int32_t variant, const Vector2f *pos, const Vector2f *velocity, void *spawner, int32_t subType, uint32_t seed);
+typedef int32_t (*FontGetStringWidth_t)(void *font, const char *str);
+typedef void (*FontDrawString_t)(void *font, const char *str, float x, float y, const KColor *color, int32_t boxWidth, bool center);
+typedef void (*FontDrawStringScaled_t)(void *font, const char *str, float x, float y, float scaleX, float scaleY, const KColor *color, int32_t boxWidth, bool center);
 
 static NSString *UUIDForHeader(const mach_header_64 *header) {
     if (!header || header->magic != MH_MAGIC_64) return @"";
@@ -439,3 +455,107 @@ uint32_t RepogonGameGetFrameCount(void) {
     SafeRead(game + kGameFrameCountOffset, fc);
     return fc;
 }
+
+// Native KAGE Font & Rendering
+
+uintptr_t RepogonGetManager(void) {
+    uintptr_t base = RepogonGetBaseAddress();
+    if (!base) return 0;
+    uintptr_t mgr = 0;
+    SafeRead(base + kManagerGlobalRVA, mgr);
+    return mgr;
+}
+
+uintptr_t RepogonGetDefaultFont(void) {
+    return RepogonGetFontByType(0);
+}
+
+uintptr_t RepogonGetFontByType(int type) {
+    uintptr_t mgr = RepogonGetManager();
+    if (!mgr) return 0;
+    switch (type) {
+        case 1: return mgr + kManagerFontUpheavalOffset;
+        case 2: return mgr + kManagerFontTeamMeatOffset;
+        case 3: return mgr + kManagerFontMPlus12Offset;
+        case 4: return mgr + kManagerFontMPlus10Offset;
+        case 0:
+        default: return mgr + kManagerFontTempestaOffset;
+    }
+}
+
+bool RepogonRenderTextNative(const char *text, float x, float y, float r, float g, float b, float a) {
+    if (!text || !*text) return false;
+    uintptr_t base = RepogonGetBaseAddress();
+    if (!base) return false;
+    uintptr_t font = RepogonGetDefaultFont();
+    if (!font) return false;
+
+    auto drawFunc = reinterpret_cast<FontDrawString_t>(base + kFontDrawStringRVA);
+    KColor color = { r, g, b, a };
+    drawFunc(reinterpret_cast<void *>(font), text, x, y, &color, 0, false);
+    return true;
+}
+
+bool RepogonRenderScaledTextNative(const char *text, float x, float y, float sx, float sy, float r, float g, float b, float a, int fontType) {
+    if (!text || !*text) return false;
+    uintptr_t base = RepogonGetBaseAddress();
+    if (!base) return false;
+    uintptr_t font = RepogonGetFontByType(fontType);
+    if (!font) font = RepogonGetDefaultFont();
+    if (!font) return false;
+
+    auto drawFunc = reinterpret_cast<FontDrawStringScaled_t>(base + kFontDrawStringScaledRVA);
+    KColor color = { r, g, b, a };
+    drawFunc(reinterpret_cast<void *>(font), text, x, y, sx, sy, &color, 0, false);
+    return true;
+}
+
+int32_t RepogonGetStringWidthNative(const char *text, int fontType) {
+    if (!text || !*text) return 0;
+    uintptr_t base = RepogonGetBaseAddress();
+    if (!base) return 0;
+    uintptr_t font = RepogonGetFontByType(fontType);
+    if (!font) font = RepogonGetDefaultFont();
+    if (!font) return 0;
+
+    auto widthFunc = reinterpret_cast<FontGetStringWidth_t>(base + kFontGetStringWidthRVA);
+    return widthFunc(reinterpret_cast<void *>(font), text);
+}
+
+// Render Hook via -[IsaacShell draw:] Swizzling
+static void (*g_orig_IsaacShell_draw)(id, SEL, BOOL) = nullptr;
+
+static void RepogonHooked_IsaacShell_draw(id self, SEL _cmd, BOOL arg1) {
+    if (g_orig_IsaacShell_draw) {
+        g_orig_IsaacShell_draw(self, _cmd, arg1);
+    }
+
+    // Isaac frame render is complete and OpenGL ES framebuffer is active!
+    // Dispatch Lua render callbacks (MC_POST_RENDER and MC_HUD_RENDER)
+    @autoreleasepool {
+        RepogonLuaDispatchRender();
+    }
+}
+
+void RepogonRenderHookInit(void) {
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        Class cls = objc_getClass("IsaacShell");
+        if (!cls) {
+            RepogonLog(@"[RenderHook] Warning: IsaacShell class not found yet.");
+            return;
+        }
+
+        SEL sel = @selector(draw:);
+        Method m = class_getInstanceMethod(cls, sel);
+        if (!m) {
+            RepogonLog(@"[RenderHook] Warning: -[IsaacShell draw:] method not found.");
+            return;
+        }
+
+        g_orig_IsaacShell_draw = reinterpret_cast<void (*)(id, SEL, BOOL)>(method_getImplementation(m));
+        method_setImplementation(m, reinterpret_cast<IMP>(RepogonHooked_IsaacShell_draw));
+        RepogonLog(@"[RenderHook] Successfully hooked -[IsaacShell draw:] -> Native in-game KAGE rendering active!");
+    });
+}
+

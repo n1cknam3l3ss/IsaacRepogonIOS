@@ -78,6 +78,22 @@ int32_t RepogonGameGetStage(void);
 int32_t RepogonGameGetStageType(void);
 uint32_t RepogonGameGetFrameCount(void);
 
+// Native KAGE Font & Rendering
+struct KColor {
+    float r;
+    float g;
+    float b;
+    float a;
+};
+
+uintptr_t RepogonGetManager(void);
+uintptr_t RepogonGetDefaultFont(void);
+uintptr_t RepogonGetFontByType(int type);
+bool RepogonRenderTextNative(const char *text, float x, float y, float r, float g, float b, float a);
+bool RepogonRenderScaledTextNative(const char *text, float x, float y, float sx, float sy, float r, float g, float b, float a, int fontType = 0);
+int32_t RepogonGetStringWidthNative(const char *text, int fontType = 0);
+void RepogonRenderHookInit(void);
+
 #ifdef __cplusplus
 }
 #endif
