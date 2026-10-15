@@ -1116,6 +1116,7 @@ static int Player_GetGlyphOfBalanceDrop(lua_State *L) {
     lua_pushinteger(L, -1); lua_rawseti(L, -2, 1);
     lua_pushinteger(L, 0); lua_rawseti(L, -2, 2);
     return 1;
+}
 static int Player_isMainPlayer(lua_State *L) { lua_pushboolean(L, 1); return 1; }
 static int Player_ClearCostumes(lua_State *L) { return 0; }
 static int Player_UseActiveItem(lua_State *L) { return 0; }
