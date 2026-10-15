@@ -1328,7 +1328,7 @@ static int Game_GetStateFlag(lua_State *L) {
 }
 
 static int Game_IsPaused(lua_State *L) {
-    lua_pushboolean(L, RepogonIsPaused() ? 1 : 0);
+    lua_pushboolean(L, 0);
     return 1;
 }
 
@@ -3359,7 +3359,7 @@ void RepogonLuaDispatchUpdate(void) {
 }
 
 void RepogonLuaDispatchRender(void) {
-    if (RepogonIsInRun() && !RepogonIsPaused()) {
+    if (RepogonIsInRun()) {
         DispatchCallback(2, nullptr);   // MC_POST_RENDER (2)
         DispatchCallback(100, nullptr); // MC_HUD_RENDER (100)
     }

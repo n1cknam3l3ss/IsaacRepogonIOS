@@ -19,6 +19,7 @@ bool RepogonIsSupportedBuild(uintptr_t *outBase);
 uintptr_t RepogonGetGame(void);
 uintptr_t RepogonGetRoom(void);
 uintptr_t RepogonGetPlayer(int index);
+void RepogonClearCachedPlayer(void);
 size_t RepogonGetEntityCount(void);
 uintptr_t RepogonGetEntityAtIndex(size_t index);
 std::vector<uintptr_t> RepogonFindEntities(int type, int variant, int subType);

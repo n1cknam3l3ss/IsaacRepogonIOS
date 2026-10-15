@@ -142,6 +142,12 @@ uintptr_t RepogonGetEntityAtIndex(size_t index) {
     return ent;
 }
 
+static uintptr_t s_cachedPlayer0 = 0;
+
+void RepogonClearCachedPlayer(void) {
+    s_cachedPlayer0 = 0;
+}
+
 uintptr_t RepogonGetPlayer(int index) {
     size_t count = RepogonGetEntityCount();
     int curIdx = 0;
@@ -150,10 +156,15 @@ uintptr_t RepogonGetPlayer(int index) {
         if (!ent) continue;
         if (RepogonEntityGetType(ent) == 1) { // Type 1 = Player
             if (curIdx == index) {
+                if (index == 0) s_cachedPlayer0 = ent;
                 return ent;
             }
             curIdx++;
         }
+    }
+    // Only return cached player during an active run (e.g. room transitions)
+    if (index == 0 && RepogonIsInRun() && s_cachedPlayer0 != 0) {
+        return s_cachedPlayer0;
     }
     return 0;
 }
@@ -712,6 +723,8 @@ void RepogonRenderPlanetariumIcon(float x, float y) {
 }
 
 // In-Game Native Render Pipeline Hook & Performance Monitor
+typedef void (*IsaacRenderFunc_t)(void *context);
+static IsaacRenderFunc_t g_orig_IsaacRender = nullptr;
 static void (*g_orig_IsaacShell_draw)(id, SEL, BOOL) = nullptr;
 
 float RepogonGetPlanetariumChance(void) {
@@ -723,7 +736,7 @@ float RepogonGetPlanetariumChance(void) {
 }
 
 static void RenderPlanetariumHUD(void) {
-    if (!RepogonIsInRun() || RepogonIsPaused()) return;
+    if (!RepogonIsInRun()) return;
 
     // Slot 7 (Angel) is at y = 174. Slot 8 (Planetarium) is natively right underneath at y = 188.
     float hudX = 20.0f;
@@ -737,21 +750,38 @@ static void RenderPlanetariumHUD(void) {
     RepogonRenderScaledTextNative(textBuf, hudX + 16.0f, hudY, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 0.5f, 0);
 }
 
+static void RepogonHooked_IsaacRender(void *context) {
+    // 1. Let Isaac finish rendering the room, entities, and native HUD
+    if (g_orig_IsaacRender) {
+        g_orig_IsaacRender(context);
+    }
+
+    // 2. We are now AT THE END of Isaac's render pass, BEFORE Present()!
+    //    Metal/GL framebuffer is open, bound, and in 2D screen coordinates.
+    //    Dispatch Lua render callbacks and native FoundHUD Planetarium ONLY when in an active run:
+    @autoreleasepool {
+        if (RepogonIsInRun()) {
+            RepogonLuaDispatchRender();
+            RenderPlanetariumHUD();
+        }
+    }
+}
+
 static void RepogonHooked_IsaacShell_draw(id self, SEL _cmd, BOOL arg1) {
+    // Hook the internal render callback [self + 0x58] on the IsaacShell instance
+    if (self) {
+        uintptr_t *pRenderFunc = reinterpret_cast<uintptr_t *>(reinterpret_cast<uintptr_t>(self) + 0x58);
+        if (*pRenderFunc && *pRenderFunc != reinterpret_cast<uintptr_t>(RepogonHooked_IsaacRender)) {
+            g_orig_IsaacRender = reinterpret_cast<IsaacRenderFunc_t>(*pRenderFunc);
+            *pRenderFunc = reinterpret_cast<uintptr_t>(RepogonHooked_IsaacRender);
+        }
+    }
+
     // Tick game events in exact lockstep with Isaac's own frame
     RepogonTick();
 
     if (g_orig_IsaacShell_draw) {
         g_orig_IsaacShell_draw(self, _cmd, arg1);
-    }
-
-    // Isaac frame render is complete and OpenGL ES framebuffer is active in 2D screen coordinates!
-    // Dispatch Lua render callbacks and native FoundHUD Planetarium ONLY when in an active, unpaused run:
-    if (RepogonIsInRun() && !RepogonIsPaused()) {
-        @autoreleasepool {
-            RepogonLuaDispatchRender();
-            RenderPlanetariumHUD();
-        }
     }
 }
 

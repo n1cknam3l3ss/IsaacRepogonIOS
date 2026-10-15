@@ -32,15 +32,13 @@ static RepogonTickTarget *g_tickTarget = nil;
 static bool g_inRun = false;
 
 static int g_noPlayerFrames = 0;
-static int s_frozenRenderFrames = 0;
-static bool s_isGamePaused = false;
 
 bool RepogonIsInRun(void) {
     return g_inRun;
 }
 
 bool RepogonIsPaused(void) {
-    return s_isGamePaused;
+    return false;
 }
 
 void RepogonTick(void) {
@@ -48,8 +46,11 @@ void RepogonTick(void) {
 
     uintptr_t game = RepogonGetGame();
     if (!game) {
-        g_inRun = false;
-        s_isGamePaused = false;
+        if (g_inRun) {
+            g_inRun = false;
+            RepogonClearCachedPlayer();
+            RepogonLuaDispatchGameExit(true);
+        }
         return;
     }
 
@@ -61,8 +62,6 @@ void RepogonTick(void) {
         g_noPlayerFrames = 0;
         if (!g_inRun) {
             g_inRun = true;
-            s_isGamePaused = false;
-            s_frozenRenderFrames = 0;
             g_lastRoom = room;
             g_lastStage = RepogonGameGetStage();
             g_lastFrameCount = RepogonGameGetFrameCount();
@@ -70,13 +69,12 @@ void RepogonTick(void) {
             RepogonLuaDispatchNewRoom();
             RepogonLuaDispatchNewLevel();
         }
-    } else if (!room || !player0) {
+    } else {
         if (g_inRun) {
             g_noPlayerFrames++;
-            if (g_noPlayerFrames > 15) { // ~0.25s of consecutive null room/player -> exited to menu
+            if (g_noPlayerFrames > 90) { // ~1.5s of consecutive null room/player -> exited to menu
                 g_inRun = false;
-                s_isGamePaused = false;
-                s_frozenRenderFrames = 0;
+                RepogonClearCachedPlayer();
                 RepogonLuaDispatchGameExit(true);
                 g_lastRoom = 0;
                 g_lastStage = -1;
@@ -86,7 +84,7 @@ void RepogonTick(void) {
 
     if (g_inRun) {
         // Room transition detection
-        if (room != g_lastRoom) {
+        if (room && room != g_lastRoom) {
             g_lastRoom = room;
             RepogonLuaDispatchNewRoom();
         }
@@ -98,18 +96,11 @@ void RepogonTick(void) {
             RepogonLuaDispatchNewLevel();
         }
 
-        // Game loop ticks and pause detection
+        // Game loop ticks
         uint32_t frameCount = RepogonGameGetFrameCount();
         if (frameCount != g_lastFrameCount) {
             g_lastFrameCount = frameCount;
-            s_frozenRenderFrames = 0;
-            s_isGamePaused = false;
             RepogonLuaDispatchUpdate();
-        } else {
-            s_frozenRenderFrames++;
-            if (s_frozenRenderFrames >= 4) { // Frozen frameCount indicates pause menu
-                s_isGamePaused = true;
-            }
         }
 
         // Guaranteed Void portal check
