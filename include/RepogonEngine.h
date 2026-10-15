@@ -84,11 +84,14 @@ struct KColor {
     float g;
     float b;
     float a;
+    uint32_t flags;
+    uint32_t pad;
 };
 
 uintptr_t RepogonGetManager(void);
 uintptr_t RepogonGetDefaultFont(void);
 uintptr_t RepogonGetFontByType(int type);
+bool RepogonIsValidFont(uintptr_t font);
 bool RepogonRenderTextNative(const char *text, float x, float y, float r, float g, float b, float a);
 bool RepogonRenderScaledTextNative(const char *text, float x, float y, float sx, float sy, float r, float g, float b, float a, int fontType = 0);
 int32_t RepogonGetStringWidthNative(const char *text, int fontType = 0);

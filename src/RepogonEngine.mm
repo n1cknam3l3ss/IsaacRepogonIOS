@@ -15,12 +15,18 @@ constexpr uintptr_t kGameGlobalRVA = 0xAC3B90;
 constexpr size_t kGameCurrentRoomOffset = 0x21550;
 constexpr size_t kGameFrameCountOffset = 0x1CF42C;
 
+constexpr uintptr_t kGameRootGlobalRVA = 0xABFAD8;
+constexpr size_t kGameFontContainerOffset = 0x2CBB8;
+constexpr size_t kGameFontHUDOffset = 0x154B50;
+
 constexpr uintptr_t kManagerGlobalRVA = 0xAC2428;
-constexpr size_t kManagerFontMPlus12Offset = 0x600;
-constexpr size_t kManagerFontMPlus10Offset = 0x20650;
-constexpr size_t kManagerFontTempestaOffset = 0x80740;
-constexpr size_t kManagerFontUpheavalOffset = 0xa0790;
-constexpr size_t kManagerFontTeamMeatOffset = 0xc07e0;
+constexpr uintptr_t kKageFontOffset = 0x1AF378;
+
+constexpr size_t kFontMPlus12Offset = 0x600;
+constexpr size_t kFontMPlus10Offset = 0x20650;
+constexpr size_t kFontTempestaOffset = 0x80740;
+constexpr size_t kFontUpheavalOffset = 0xa0790;
+constexpr size_t kFontTeamMeatOffset = 0xc07e0;
 
 constexpr uintptr_t kFontGetStringWidthRVA = 0x8BDEC4;
 constexpr uintptr_t kFontDrawStringRVA = 0x8BE324;
@@ -458,6 +464,24 @@ uint32_t RepogonGameGetFrameCount(void) {
 
 // Native KAGE Font & Rendering
 
+bool RepogonIsValidFont(uintptr_t fontPtr) {
+    if (!fontPtr) return false;
+
+    uint8_t isLoaded = 0;
+    if (!SafeRead(fontPtr, isLoaded) || isLoaded == 0) return false;
+
+    uint32_t pages = 0;
+    if (!SafeRead(fontPtr + 0x40, pages) || pages == 0 || pages > 100) return false;
+
+    uintptr_t textures = 0;
+    if (!SafeRead(fontPtr + 0x48, textures) || textures == 0 || textures == (uintptr_t)-1) return false;
+
+    uintptr_t firstTex = 0;
+    if (!SafeRead(textures, firstTex) || firstTex == 0 || firstTex == (uintptr_t)-1) return false;
+
+    return true;
+}
+
 uintptr_t RepogonGetManager(void) {
     uintptr_t base = RepogonGetBaseAddress();
     if (!base) return 0;
@@ -471,16 +495,50 @@ uintptr_t RepogonGetDefaultFont(void) {
 }
 
 uintptr_t RepogonGetFontByType(int type) {
-    uintptr_t mgr = RepogonGetManager();
-    if (!mgr) return 0;
-    switch (type) {
-        case 1: return mgr + kManagerFontUpheavalOffset;
-        case 2: return mgr + kManagerFontTeamMeatOffset;
-        case 3: return mgr + kManagerFontMPlus12Offset;
-        case 4: return mgr + kManagerFontMPlus10Offset;
-        case 0:
-        default: return mgr + kManagerFontTempestaOffset;
+    uintptr_t base = RepogonGetBaseAddress();
+    if (!base) return 0;
+
+    // 1. Primary: Fonts in GameRoot UI / Font container (0xABFAD8 + 0x2CBB8)
+    uintptr_t gameRoot = 0;
+    if (SafeRead(base + kGameRootGlobalRVA, gameRoot) && gameRoot != 0) {
+        uintptr_t container = gameRoot + kGameFontContainerOffset;
+        uintptr_t candidate = 0;
+        switch (type) {
+            case 1: candidate = container + kFontUpheavalOffset; break;
+            case 2: candidate = container + kFontTeamMeatOffset; break;
+            case 3: candidate = container + kFontMPlus12Offset; break;
+            case 4: candidate = container + kFontMPlus10Offset; break;
+            case 0:
+            default: candidate = container + kFontTempestaOffset; break;
+        }
+        if (RepogonIsValidFont(candidate)) return candidate;
+
+        // Fallback to Tempesta inside container
+        if (candidate != container + kFontTempestaOffset && RepogonIsValidFont(container + kFontTempestaOffset)) {
+            return container + kFontTempestaOffset;
+        }
+
+        // Fallback to HUD / Menu font at 0x154B50
+        if (RepogonIsValidFont(gameRoot + kGameFontHUDOffset)) {
+            return gameRoot + kGameFontHUDOffset;
+        }
     }
+
+    // 2. Secondary: Font in KAGE Manager (0xAC3B90 + 0x1AF378)
+    uintptr_t kageMgr = 0;
+    if (SafeRead(base + kGameGlobalRVA, kageMgr) && kageMgr != 0) {
+        uintptr_t candidate = kageMgr + kKageFontOffset;
+        if (RepogonIsValidFont(candidate)) return candidate;
+    }
+
+    // 3. Fallback: Manager (0xAC2428)
+    uintptr_t mgr = RepogonGetManager();
+    if (mgr) {
+        uintptr_t candidate = mgr + kFontTempestaOffset;
+        if (RepogonIsValidFont(candidate)) return candidate;
+    }
+
+    return 0;
 }
 
 bool RepogonRenderTextNative(const char *text, float x, float y, float r, float g, float b, float a) {
@@ -488,10 +546,16 @@ bool RepogonRenderTextNative(const char *text, float x, float y, float r, float 
     uintptr_t base = RepogonGetBaseAddress();
     if (!base) return false;
     uintptr_t font = RepogonGetDefaultFont();
-    if (!font) return false;
+    if (!font || !RepogonIsValidFont(font)) {
+        static uint32_t s_fontWarnThrottle = 0;
+        if ((++s_fontWarnThrottle % 180) == 1) {
+            RepogonLog(@"[NativeFont] Font not ready yet, skipping text draw: %s", text);
+        }
+        return false;
+    }
 
     auto drawFunc = reinterpret_cast<FontDrawString_t>(base + kFontDrawStringRVA);
-    KColor color = { r, g, b, a };
+    KColor color = { r, g, b, a, 0, 0 };
     drawFunc(reinterpret_cast<void *>(font), text, x, y, &color, 0, false);
     return true;
 }
@@ -501,11 +565,10 @@ bool RepogonRenderScaledTextNative(const char *text, float x, float y, float sx,
     uintptr_t base = RepogonGetBaseAddress();
     if (!base) return false;
     uintptr_t font = RepogonGetFontByType(fontType);
-    if (!font) font = RepogonGetDefaultFont();
-    if (!font) return false;
+    if (!font || !RepogonIsValidFont(font)) return false;
 
     auto drawFunc = reinterpret_cast<FontDrawStringScaled_t>(base + kFontDrawStringScaledRVA);
-    KColor color = { r, g, b, a };
+    KColor color = { r, g, b, a, 0, 0 };
     drawFunc(reinterpret_cast<void *>(font), text, x, y, sx, sy, &color, 0, false);
     return true;
 }
@@ -515,8 +578,7 @@ int32_t RepogonGetStringWidthNative(const char *text, int fontType) {
     uintptr_t base = RepogonGetBaseAddress();
     if (!base) return 0;
     uintptr_t font = RepogonGetFontByType(fontType);
-    if (!font) font = RepogonGetDefaultFont();
-    if (!font) return 0;
+    if (!font || !RepogonIsValidFont(font)) return 0;
 
     auto widthFunc = reinterpret_cast<FontGetStringWidth_t>(base + kFontGetStringWidthRVA);
     return widthFunc(reinterpret_cast<void *>(font), text);
