@@ -2,11 +2,11 @@
 
 #import <os/log.h>
 #include <mutex>
-#include <fstream>
+#include <cstdio>
 
 static std::mutex g_logMutex;
 static NSString *g_logFilePath = nil;
-static std::ofstream g_logFile;
+static FILE *g_logFile = NULL;
 
 static void RepogonLogInitLocked(void) {
     if (!g_logFilePath) {
@@ -14,10 +14,13 @@ static void RepogonLogInitLocked(void) {
         NSString *docDir = paths.firstObject;
         if (docDir) {
             g_logFilePath = [docDir stringByAppendingPathComponent:@"repogon_log.txt"];
-            g_logFile.open([g_logFilePath UTF8String], std::ios::out | std::ios::app);
-            if (g_logFile.is_open()) {
-                g_logFile << "\n=== Isaac REPENTOGON iOS Started: "
-                          << [[NSDate date] description].UTF8String << " ===\n" << std::flush;
+            g_logFile = fopen([g_logFilePath UTF8String], "a");
+            if (g_logFile) {
+                NSDateFormatter *df = [[NSDateFormatter alloc] init];
+                df.dateFormat = @"yyyy-MM-dd HH:mm:ss";
+                NSString *dateStr = [df stringFromDate:[NSDate date]];
+                fprintf(g_logFile, "\n=== Isaac REPENTOGON iOS Started: %s ===\n", [dateStr UTF8String]);
+                fflush(g_logFile);
             }
         }
     }
@@ -37,8 +40,9 @@ void RepogonLogRaw(const char *message) {
     std::lock_guard<std::mutex> lock(g_logMutex);
     RepogonLogInitLocked();
     NSLog(@"[REPENTOGON] %s", message);
-    if (g_logFile.is_open()) {
-        g_logFile << message << "\n" << std::flush;
+    if (g_logFile) {
+        fprintf(g_logFile, "%s\n", message);
+        fflush(g_logFile);
     }
 }
 

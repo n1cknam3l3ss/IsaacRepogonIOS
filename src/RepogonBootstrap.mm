@@ -38,6 +38,8 @@ bool RepogonIsInRun(void) {
 }
 
 void RepogonTick(void) {
+    RepogonRenderHookInit();
+
     uintptr_t game = RepogonGetGame();
     if (!game) return;
 
@@ -140,7 +142,6 @@ void RepogonStart(void) {
 
 __attribute__((constructor)) static void RepogonConstructor(void) {
     @autoreleasepool {
-        RepogonRenderHookInit();
         dispatch_async(dispatch_get_main_queue(), ^{
             NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
             [center addObserverForName:UIApplicationDidBecomeActiveNotification

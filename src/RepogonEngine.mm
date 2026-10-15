@@ -538,24 +538,23 @@ static void RepogonHooked_IsaacShell_draw(id self, SEL _cmd, BOOL arg1) {
 }
 
 void RepogonRenderHookInit(void) {
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        Class cls = objc_getClass("IsaacShell");
-        if (!cls) {
-            RepogonLog(@"[RenderHook] Warning: IsaacShell class not found yet.");
-            return;
-        }
+    static bool s_hooked = false;
+    if (s_hooked) return;
 
-        SEL sel = @selector(draw:);
-        Method m = class_getInstanceMethod(cls, sel);
-        if (!m) {
-            RepogonLog(@"[RenderHook] Warning: -[IsaacShell draw:] method not found.");
-            return;
-        }
+    Class cls = objc_getClass("IsaacShell");
+    if (!cls) {
+        return;
+    }
 
-        g_orig_IsaacShell_draw = reinterpret_cast<void (*)(id, SEL, BOOL)>(method_getImplementation(m));
-        method_setImplementation(m, reinterpret_cast<IMP>(RepogonHooked_IsaacShell_draw));
-        RepogonLog(@"[RenderHook] Successfully hooked -[IsaacShell draw:] -> Native in-game KAGE rendering active!");
-    });
+    SEL sel = @selector(draw:);
+    Method m = class_getInstanceMethod(cls, sel);
+    if (!m) {
+        return;
+    }
+
+    g_orig_IsaacShell_draw = reinterpret_cast<void (*)(id, SEL, BOOL)>(method_getImplementation(m));
+    method_setImplementation(m, reinterpret_cast<IMP>(RepogonHooked_IsaacShell_draw));
+    s_hooked = true;
+    RepogonLog(@"[RenderHook] Successfully hooked -[IsaacShell draw:] -> Native in-game KAGE rendering active!");
 }
 
