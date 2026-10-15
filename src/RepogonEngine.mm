@@ -142,8 +142,6 @@ uintptr_t RepogonGetEntityAtIndex(size_t index) {
     return ent;
 }
 
-static uintptr_t s_cachedPlayer0 = 0;
-
 uintptr_t RepogonGetPlayer(int index) {
     size_t count = RepogonGetEntityCount();
     int curIdx = 0;
@@ -152,14 +150,10 @@ uintptr_t RepogonGetPlayer(int index) {
         if (!ent) continue;
         if (RepogonEntityGetType(ent) == 1) { // Type 1 = Player
             if (curIdx == index) {
-                if (index == 0) s_cachedPlayer0 = ent;
                 return ent;
             }
             curIdx++;
         }
-    }
-    if (index == 0 && s_cachedPlayer0 != 0) {
-        return s_cachedPlayer0;
     }
     return 0;
 }
@@ -712,6 +706,9 @@ void RepogonRenderPlanetariumIcon(float x, float y) {
     Vector2f pos = { x, y };
     Vector2f zero = { 0.0f, 0.0f };
     spriteRender(reinterpret_cast<void *>(hudStats), &pos, &zero, &zero);
+
+    // Restore frame to 7 (Angel) to avoid corrupting native FoundHUD state
+    setFrame(reinterpret_cast<void *>(hudStats), 7);
 }
 
 // In-Game Native Render Pipeline Hook & Performance Monitor
@@ -726,11 +723,11 @@ float RepogonGetPlanetariumChance(void) {
 }
 
 static void RenderPlanetariumHUD(void) {
-    if (!RepogonIsInRun()) return;
+    if (!RepogonIsInRun() || RepogonIsPaused()) return;
 
-    // Slot 7 (Angel) is at y = 174. Slot 8 (Planetarium) is natively right underneath at y = 186.
+    // Slot 7 (Angel) is at y = 174. Slot 8 (Planetarium) is natively right underneath at y = 188.
     float hudX = 20.0f;
-    float hudY = 186.0f;
+    float hudY = 188.0f;
 
     RepogonRenderPlanetariumIcon(hudX, hudY);
 
@@ -749,10 +746,12 @@ static void RepogonHooked_IsaacShell_draw(id self, SEL _cmd, BOOL arg1) {
     }
 
     // Isaac frame render is complete and OpenGL ES framebuffer is active in 2D screen coordinates!
-    // Dispatch Lua render callbacks and native FoundHUD Planetarium:
-    @autoreleasepool {
-        RepogonLuaDispatchRender();
-        RenderPlanetariumHUD();
+    // Dispatch Lua render callbacks and native FoundHUD Planetarium ONLY when in an active, unpaused run:
+    if (RepogonIsInRun() && !RepogonIsPaused()) {
+        @autoreleasepool {
+            RepogonLuaDispatchRender();
+            RenderPlanetariumHUD();
+        }
     }
 }
 

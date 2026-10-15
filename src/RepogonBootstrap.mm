@@ -32,16 +32,26 @@ static RepogonTickTarget *g_tickTarget = nil;
 static bool g_inRun = false;
 
 static int g_noPlayerFrames = 0;
+static int s_frozenRenderFrames = 0;
+static bool s_isGamePaused = false;
 
 bool RepogonIsInRun(void) {
     return g_inRun;
+}
+
+bool RepogonIsPaused(void) {
+    return s_isGamePaused;
 }
 
 void RepogonTick(void) {
     RepogonRenderHookInit();
 
     uintptr_t game = RepogonGetGame();
-    if (!game) return;
+    if (!game) {
+        g_inRun = false;
+        s_isGamePaused = false;
+        return;
+    }
 
     uintptr_t room = RepogonGetRoom();
     uintptr_t player0 = RepogonGetPlayer(0);
@@ -51,6 +61,8 @@ void RepogonTick(void) {
         g_noPlayerFrames = 0;
         if (!g_inRun) {
             g_inRun = true;
+            s_isGamePaused = false;
+            s_frozenRenderFrames = 0;
             g_lastRoom = room;
             g_lastStage = RepogonGameGetStage();
             g_lastFrameCount = RepogonGameGetFrameCount();
@@ -61,8 +73,10 @@ void RepogonTick(void) {
     } else if (!room || !player0) {
         if (g_inRun) {
             g_noPlayerFrames++;
-            if (g_noPlayerFrames > 90) { // 1.5s of consecutive null room/player
+            if (g_noPlayerFrames > 15) { // ~0.25s of consecutive null room/player -> exited to menu
                 g_inRun = false;
+                s_isGamePaused = false;
+                s_frozenRenderFrames = 0;
                 RepogonLuaDispatchGameExit(true);
                 g_lastRoom = 0;
                 g_lastStage = -1;
@@ -84,11 +98,18 @@ void RepogonTick(void) {
             RepogonLuaDispatchNewLevel();
         }
 
-        // Game loop ticks
+        // Game loop ticks and pause detection
         uint32_t frameCount = RepogonGameGetFrameCount();
         if (frameCount != g_lastFrameCount) {
             g_lastFrameCount = frameCount;
+            s_frozenRenderFrames = 0;
+            s_isGamePaused = false;
             RepogonLuaDispatchUpdate();
+        } else {
+            s_frozenRenderFrames++;
+            if (s_frozenRenderFrames >= 4) { // Frozen frameCount indicates pause menu
+                s_isGamePaused = true;
+            }
         }
 
         // Guaranteed Void portal check

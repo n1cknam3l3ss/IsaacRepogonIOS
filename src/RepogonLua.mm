@@ -453,20 +453,6 @@ static int Sprite_new(lua_State *L) {
     lua_pushcfunction(L, dummyFunc); lua_setfield(L, -2, "Update");
 
     auto renderFunc = [](lua_State *st) -> int {
-        Vector2f pos;
-        pos.x = 0.0f;
-        pos.y = 0.0f;
-        if (lua_istable(st, 2) || lua_isuserdata(st, 2)) {
-            pos = CheckVector(st, 2);
-        }
-        lua_getfield(st, 1, "__anm2");
-        if (lua_isstring(st, -1)) {
-            const char *anm = lua_tostring(st, -1);
-            if (strstr(anm, "hudstats") || strstr(anm, "planetarium")) {
-                RepogonRenderPlanetariumIcon(pos.x, pos.y);
-            }
-        }
-        lua_pop(st, 1);
         return 0;
     };
     lua_pushcfunction(L, renderFunc); lua_setfield(L, -2, "Render");
@@ -1342,7 +1328,7 @@ static int Game_GetStateFlag(lua_State *L) {
 }
 
 static int Game_IsPaused(lua_State *L) {
-    lua_pushboolean(L, 0);
+    lua_pushboolean(L, RepogonIsPaused() ? 1 : 0);
     return 1;
 }
 
@@ -1848,6 +1834,10 @@ static int Isaac_GetEntityTypeByName(lua_State *L) {
 
 static int Isaac_GetPlayerTypeByName(lua_State *L) {
     const char *name = luaL_optstring(L, 1, "");
+    if (name && (strcasecmp(name, "Car") == 0 || strcasecmp(name, "The Car") == 0)) {
+        lua_pushinteger(L, 41);
+        return 1;
+    }
     int id = RepogonGetPlayerTypeByName(name);
     if (id < 0) {
         id = static_cast<int>((std::hash<std::string>{}(name) % 100) + 50);
@@ -2088,6 +2078,10 @@ static int Mod_AddCallback(lua_State *L) {
     if (!lua_isfunction(L, 3)) {
         return luaL_error(L, "bad argument #2 to 'AddCallback' (function expected)");
     }
+    if ((modName == "Planetarium Chance" || modName == "PlanetariumChance") && callbackId == 2) {
+        RepogonLog(@"[PlanetariumChance] Suppressed Lua MC_POST_RENDER callback in favor of native FoundHUD rendering.");
+        return 0;
+    }
     int param = static_cast<int>(luaL_optinteger(L, 4, -1));
 
     // Save mod table reference (self)
@@ -2125,6 +2119,10 @@ static int Mod_AddPriorityCallback(lua_State *L) {
     int priority = static_cast<int>(luaL_optinteger(L, 3, 0));
     if (!lua_isfunction(L, 4)) {
         return luaL_error(L, "bad argument #3 to 'AddPriorityCallback' (function expected)");
+    }
+    if ((modName == "Planetarium Chance" || modName == "PlanetariumChance") && callbackId == 2) {
+        RepogonLog(@"[PlanetariumChance] Suppressed Lua MC_POST_RENDER callback in favor of native FoundHUD rendering.");
+        return 0;
     }
     int param = static_cast<int>(luaL_optinteger(L, 5, -1));
 
@@ -3361,8 +3359,8 @@ void RepogonLuaDispatchUpdate(void) {
 }
 
 void RepogonLuaDispatchRender(void) {
-    DispatchCallback(2, nullptr);   // MC_POST_RENDER (2)
-    if (RepogonIsInRun()) {
+    if (RepogonIsInRun() && !RepogonIsPaused()) {
+        DispatchCallback(2, nullptr);   // MC_POST_RENDER (2)
         DispatchCallback(100, nullptr); // MC_HUD_RENDER (100)
     }
 }
