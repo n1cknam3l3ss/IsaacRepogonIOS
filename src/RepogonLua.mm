@@ -254,6 +254,14 @@ static int Vector_tostring(lua_State *L) {
     return 1;
 }
 
+static int Vector_GetAngleDegrees(lua_State *L) {
+    Vector2f a = CheckVector(L, 1);
+    float rad = std::atan2(a.y, a.x);
+    float deg = rad * (180.0f / 3.14159265358979323846f);
+    lua_pushnumber(L, deg);
+    return 1;
+}
+
 #pragma mark - KColor Class
 
 static int KColor_new(lua_State *L) {
@@ -273,6 +281,10 @@ static int KColor_new(lua_State *L) {
     lua_pushnumber(L, 0); lua_setfield(L, -2, "RO");
     lua_pushnumber(L, 0); lua_setfield(L, -2, "GO");
     lua_pushnumber(L, 0); lua_setfield(L, -2, "BO");
+    lua_pushcfunction(L, [](lua_State *st) -> int { return 0; }); lua_setfield(L, -2, "SetColorize");
+    lua_pushcfunction(L, [](lua_State *st) -> int { return 0; }); lua_setfield(L, -2, "SetTint");
+    lua_pushcfunction(L, [](lua_State *st) -> int { return 0; }); lua_setfield(L, -2, "SetOffset");
+    lua_pushcfunction(L, [](lua_State *st) -> int { return 0; }); lua_setfield(L, -2, "Reset");
     return 1;
 }
 
@@ -420,6 +432,10 @@ static int Sprite_new(lua_State *L) {
     lua_newtable(L);
     PushVector(L, 1.0f, 1.0f);
     lua_setfield(L, -2, "Scale");
+    PushVector(L, 0.0f, 0.0f);
+    lua_setfield(L, -2, "Offset");
+    lua_pushnumber(L, 0.0);
+    lua_setfield(L, -2, "Rotation");
 
     auto dummyFunc = [](lua_State *st) -> int { return 0; };
     auto loadFunc = [](lua_State *st) -> int {
@@ -537,6 +553,8 @@ static int Entity_index(lua_State *L) {
         lua_pushinteger(L, 0); return 1;
     } else if (strcmp(key, "SpawnerEntity") == 0) {
         lua_pushnil(L); return 1;
+    } else if (strcmp(key, "Color") == 0) {
+        return KColor_new(L);
     }
 
     return 0;
@@ -559,6 +577,8 @@ static int Entity_newindex(lua_State *L) {
     } else if (strcmp(key, "MaxHitPoints") == 0) {
         float hp = static_cast<float>(luaL_checknumber(L, 3));
         RepogonEntitySetMaxHP(ent, hp);
+    } else if (strcmp(key, "Color") == 0) {
+        // Color override handled gracefully
     }
     return 0;
 }
@@ -709,6 +729,59 @@ static int Entity_ToLaser(lua_State *L) {
 
 static int Entity_ToKnife(lua_State *L) {
     lua_pushnil(L);
+    return 1;
+}
+
+static int Entity_ToEffect(lua_State *L) {
+    uintptr_t ent = CheckEntityPtr(L, 1);
+    if (ent) {
+        PushEntity(L, ent);
+    } else {
+        lua_pushnil(L);
+    }
+    return 1;
+}
+
+static int Entity_ToDoor(lua_State *L) {
+    lua_pushnil(L);
+    return 1;
+}
+
+static int Entity_ToPit(lua_State *L) {
+    lua_pushnil(L);
+    return 1;
+}
+
+static int Entity_TakeDamage(lua_State *L) {
+    uintptr_t ent = CheckEntityPtr(L, 1);
+    float damage = static_cast<float>(luaL_optnumber(L, 2, 0.0));
+    if (ent && damage > 0.0f) {
+        float hp = RepogonEntityGetHP(ent);
+        RepogonEntitySetHP(ent, std::max(0.0f, hp - damage));
+    }
+    lua_pushboolean(L, 1);
+    return 1;
+}
+
+static int Entity_IsBoss(lua_State *L) {
+    lua_pushboolean(L, 0);
+    return 1;
+}
+
+static int EntityRef_new(lua_State *L) {
+    uintptr_t ent = CheckEntityPtr(L, 1);
+    lua_newtable(L);
+    if (ent) {
+        PushEntity(L, ent);
+    } else {
+        lua_pushnil(L);
+    }
+    lua_setfield(L, -2, "Entity");
+    lua_pushinteger(L, ent ? RepogonEntityGetType(ent) : 0); lua_setfield(L, -2, "Type");
+    lua_pushinteger(L, ent ? RepogonEntityGetVariant(ent) : 0); lua_setfield(L, -2, "Variant");
+    lua_pushinteger(L, ent ? RepogonEntityGetSubType(ent) : 0); lua_setfield(L, -2, "SubType");
+    PushVector(L, 0.0f, 0.0f); lua_setfield(L, -2, "Position");
+    PushVector(L, 0.0f, 0.0f); lua_setfield(L, -2, "Velocity");
     return 1;
 }
 
@@ -1043,8 +1116,9 @@ static int Player_GetGlyphOfBalanceDrop(lua_State *L) {
     lua_pushinteger(L, -1); lua_rawseti(L, -2, 1);
     lua_pushinteger(L, 0); lua_rawseti(L, -2, 2);
     return 1;
-}
 static int Player_isMainPlayer(lua_State *L) { lua_pushboolean(L, 1); return 1; }
+static int Player_ClearCostumes(lua_State *L) { return 0; }
+static int Player_UseActiveItem(lua_State *L) { return 0; }
 
 void PushPlayer(lua_State *L, uintptr_t player) {
     if (!player) { lua_pushnil(L); return; }
@@ -1098,6 +1172,7 @@ static int Room_GetDoor(lua_State *L) {
     lua_pushinteger(L, 0); lua_setfield(L, -2, "State");
     lua_pushcfunction(L, [](lua_State *st) -> int { lua_pushboolean(st, 0); return 1; }); lua_setfield(L, -2, "IsOpen");
     lua_pushcfunction(L, [](lua_State *st) -> int { lua_pushboolean(st, 0); return 1; }); lua_setfield(L, -2, "IsLocked");
+    lua_pushcfunction(L, [](lua_State *st) -> int { return 0; }); lua_setfield(L, -2, "SetLocked");
     lua_pushcfunction(L, [](lua_State *st) -> int { lua_pushboolean(st, 0); return 1; }); lua_setfield(L, -2, "CanBlowUp");
     lua_pushcfunction(L, [](lua_State *st) -> int { return 0; }); lua_setfield(L, -2, "Open");
     lua_pushcfunction(L, [](lua_State *st) -> int { return 0; }); lua_setfield(L, -2, "Close");
@@ -1119,6 +1194,35 @@ static int Room_SetFloorColor(lua_State *L) { return 0; }
 static int Room_SetWallColor(lua_State *L) { return 0; }
 static int Room_GetBackdropType(lua_State *L) { lua_pushinteger(L, 1); return 1; }
 static int Room_GetGridEntity(lua_State *L) { lua_pushnil(L); return 1; }
+
+static int Room_GetGridEntityFromPos(lua_State *L) {
+    Vector2f pos = CheckVector(L, 2);
+    lua_newtable(L);
+    PushVector(L, pos.x, pos.y); lua_setfield(L, -2, "Position");
+    auto toDoor = [](lua_State *st) -> int {
+        lua_newtable(st);
+        lua_pushcfunction(st, [](lua_State *s) -> int { lua_pushboolean(s, 0); return 1; }); lua_setfield(st, -2, "IsLocked");
+        lua_pushcfunction(st, [](lua_State *s) -> int { return 0; }); lua_setfield(st, -2, "SetLocked");
+        lua_pushcfunction(st, [](lua_State *s) -> int { lua_pushboolean(s, 0); return 1; }); lua_setfield(st, -2, "IsOpen");
+        lua_pushcfunction(st, [](lua_State *s) -> int { return 0; }); lua_setfield(st, -2, "Open");
+        lua_pushcfunction(st, [](lua_State *s) -> int { return 0; }); lua_setfield(st, -2, "Close");
+        lua_pushcfunction(st, [](lua_State *s) -> int { return 0; }); lua_setfield(st, -2, "Destroy");
+        lua_pushcfunction(st, Entity_GetSprite); lua_setfield(st, -2, "GetSprite");
+        PushVector(st, 0.0f, 0.0f); lua_setfield(st, -2, "Position");
+        return 1;
+    };
+    auto toPit = [](lua_State *st) -> int {
+        lua_newtable(st);
+        lua_pushcfunction(st, [](lua_State *s) -> int { return 0; }); lua_setfield(st, -2, "MakeBridge");
+        lua_pushcfunction(st, [](lua_State *s) -> int { return 0; }); lua_setfield(st, -2, "Destroy");
+        return 1;
+    };
+    lua_pushcfunction(L, toDoor); lua_setfield(L, -2, "ToDoor");
+    lua_pushcfunction(L, toPit); lua_setfield(L, -2, "ToPit");
+    lua_pushcfunction(L, [](lua_State *st) -> int { return 0; }); lua_setfield(L, -2, "Destroy");
+    lua_pushcfunction(L, [](lua_State *st) -> int { lua_pushinteger(st, 0); return 1; }); lua_setfield(L, -2, "GetType");
+    return 1;
+}
 static int Room_GetRenderScrollOffset(lua_State *L) { PushVector(L, 0.0f, 0.0f); return 1; }
 static int Room_IsCurrentRoomLastBoss(lua_State *L) { lua_pushboolean(L, 0); return 1; }
 static int Room_GetRoomConfigStage(lua_State *L) { lua_pushinteger(L, 1); return 1; }
@@ -1161,6 +1265,21 @@ static int Game_GetLevel(lua_State *L) {
 static int Game_GetFrameCount(lua_State *L) {
     lua_pushinteger(L, RepogonGameGetFrameCount());
     return 1;
+}
+
+static int Game_GetPlayer(lua_State *L) {
+    int idx = static_cast<int>(luaL_optinteger(L, 2, 0));
+    uintptr_t p = RepogonGetPlayer(idx);
+    PushPlayer(L, p);
+    return 1;
+}
+
+static int Game_Update(lua_State *L) {
+    return 0;
+}
+
+static int Game_StartRoomTransition(lua_State *L) {
+    return 0;
 }
 
 static int Game_Spawn(lua_State *L) {
@@ -1391,6 +1510,34 @@ static int Level_UncoverHiddenDoor(lua_State *L) { return 0; }
 static int Level_MakeRedRoomDoor(lua_State *L) { return 0; }
 static int Level_GetStateFlag(lua_State *L) { lua_pushboolean(L, 0); return 1; }
 static int Level_GetCanSeeEverything(lua_State *L) { lua_pushboolean(L, 0); return 1; }
+static int Level_ChangeRoom(lua_State *L) { return 0; }
+
+static int Level_index(lua_State *L) {
+    const char *key = luaL_checkstring(L, 2);
+    luaL_getmetatable(L, "IsaacLevel");
+    lua_pushvalue(L, 2);
+    lua_rawget(L, -2);
+    if (!lua_isnil(L, -1)) return 1;
+    lua_pop(L, 2);
+
+    if (strcmp(key, "EnterDoor") == 0) {
+        lua_pushinteger(L, -1);
+        return 1;
+    }
+    if (strcmp(key, "LeaveDoor") == 0) {
+        lua_pushinteger(L, -1);
+        return 1;
+    }
+    if (strcmp(key, "DungeonReturnRoomIndex") == 0) {
+        lua_pushinteger(L, -1);
+        return 1;
+    }
+    if (strcmp(key, "GreedModeWave") == 0) {
+        lua_pushinteger(L, 0);
+        return 1;
+    }
+    return 0;
+}
 
 void PushLevel(lua_State *L) {
     lua_newtable(L);
@@ -2647,6 +2794,7 @@ CollectionMenu = {
     lua_pushcfunction(g_L, KColor_new); lua_setglobal(g_L, "Color");
     lua_pushcfunction(g_L, Font_new); lua_setglobal(g_L, "Font");
     lua_pushcfunction(g_L, Sprite_new); lua_setglobal(g_L, "Sprite");
+    lua_pushcfunction(g_L, EntityRef_new); lua_setglobal(g_L, "EntityRef");
     lua_pushcfunction(g_L, [](lua_State *st) -> int {
         PushGame(st, RepogonGetGame());
         return 1;
@@ -2667,7 +2815,18 @@ Vector = setmetatable({
 })
 
 local orig_Game = Game
-Game = setmetatable({}, {
+Game = setmetatable({
+    GetPlayer = function(self, idx)
+        if type(self) == "number" then idx = self end
+        return orig_Game():GetPlayer(idx or 0)
+    end,
+    GetRoom = function(_) return orig_Game():GetRoom() end,
+    GetLevel = function(_) return orig_Game():GetLevel() end,
+    GetFrameCount = function(_) return orig_Game():GetFrameCount() end,
+    GetSeeds = function(_) return orig_Game():GetSeeds() end,
+    GetHUD = function(_) return orig_Game():GetHUD() end,
+    IsPaused = function(_) return orig_Game():IsPaused() end,
+}, {
     __call = function(_) return orig_Game() end,
     __index = function(_, k)
         local inst = orig_Game()
@@ -2684,6 +2843,9 @@ Game = setmetatable({}, {
         return v
     end
 })
+
+Level = function() return Game():GetLevel() end
+Room = function() return Game():GetRoom() end
 )RAW_POST";
     luaL_dostring(g_L, kPostInitScript);
 
@@ -2702,6 +2864,7 @@ Game = setmetatable({}, {
     lua_pushcfunction(g_L, Vector_Distance); lua_setfield(g_L, -2, "Distance");
     lua_pushcfunction(g_L, Vector_Dot); lua_setfield(g_L, -2, "Dot");
     lua_pushcfunction(g_L, Vector_Rotated); lua_setfield(g_L, -2, "Rotated");
+    lua_pushcfunction(g_L, Vector_GetAngleDegrees); lua_setfield(g_L, -2, "GetAngleDegrees");
     lua_pushvalue(g_L, -1); lua_setfield(g_L, -2, "__index");
     lua_pop(g_L, 1);
 
@@ -2718,6 +2881,11 @@ Game = setmetatable({}, {
     lua_pushcfunction(g_L, Entity_ToTear); lua_setfield(g_L, -2, "ToTear");
     lua_pushcfunction(g_L, Entity_ToLaser); lua_setfield(g_L, -2, "ToLaser");
     lua_pushcfunction(g_L, Entity_ToKnife); lua_setfield(g_L, -2, "ToKnife");
+    lua_pushcfunction(g_L, Entity_ToEffect); lua_setfield(g_L, -2, "ToEffect");
+    lua_pushcfunction(g_L, Entity_ToDoor); lua_setfield(g_L, -2, "ToDoor");
+    lua_pushcfunction(g_L, Entity_ToPit); lua_setfield(g_L, -2, "ToPit");
+    lua_pushcfunction(g_L, Entity_TakeDamage); lua_setfield(g_L, -2, "TakeDamage");
+    lua_pushcfunction(g_L, Entity_IsBoss); lua_setfield(g_L, -2, "IsBoss");
     lua_pushcfunction(g_L, Entity_Exists); lua_setfield(g_L, -2, "Exists");
     lua_pushcfunction(g_L, Entity_IsDead); lua_setfield(g_L, -2, "IsDead");
     lua_pushcfunction(g_L, Entity_IsActive); lua_setfield(g_L, -2, "IsActive");
@@ -2759,6 +2927,8 @@ Game = setmetatable({}, {
     lua_pushcfunction(g_L, Player_SetActiveCharge); lua_setfield(g_L, -2, "SetActiveCharge");
     lua_pushcfunction(g_L, Player_GetPlayerType); lua_setfield(g_L, -2, "GetPlayerType");
     lua_pushcfunction(g_L, Player_ChangePlayerType); lua_setfield(g_L, -2, "ChangePlayerType");
+    lua_pushcfunction(g_L, Player_ClearCostumes); lua_setfield(g_L, -2, "ClearCostumes");
+    lua_pushcfunction(g_L, Player_UseActiveItem); lua_setfield(g_L, -2, "UseActiveItem");
     lua_pushcfunction(g_L, Player_GetName); lua_setfield(g_L, -2, "GetName");
     lua_pushcfunction(g_L, Player_HasCollectible); lua_setfield(g_L, -2, "HasCollectible");
     lua_pushcfunction(g_L, Player_GetEffects); lua_setfield(g_L, -2, "GetEffects");
@@ -2858,6 +3028,7 @@ Game = setmetatable({}, {
     lua_pushcfunction(g_L, Room_SetWallColor); lua_setfield(g_L, -2, "SetWallColor");
     lua_pushcfunction(g_L, Room_GetBackdropType); lua_setfield(g_L, -2, "GetBackdropType");
     lua_pushcfunction(g_L, Room_GetGridEntity); lua_setfield(g_L, -2, "GetGridEntity");
+    lua_pushcfunction(g_L, Room_GetGridEntityFromPos); lua_setfield(g_L, -2, "GetGridEntityFromPos");
     lua_pushcfunction(g_L, Room_GetRenderScrollOffset); lua_setfield(g_L, -2, "GetRenderScrollOffset");
     lua_pushcfunction(g_L, Room_IsCurrentRoomLastBoss); lua_setfield(g_L, -2, "IsCurrentRoomLastBoss");
     lua_pushcfunction(g_L, Room_GetRoomConfigStage); lua_setfield(g_L, -2, "GetRoomConfigStage");
@@ -2875,9 +3046,12 @@ Game = setmetatable({}, {
     luaL_newmetatable(g_L, "IsaacGame");
     lua_pushcfunction(g_L, Game_GetRoom); lua_setfield(g_L, -2, "GetRoom");
     lua_pushcfunction(g_L, Game_GetLevel); lua_setfield(g_L, -2, "GetLevel");
+    lua_pushcfunction(g_L, Game_GetPlayer); lua_setfield(g_L, -2, "GetPlayer");
     lua_pushcfunction(g_L, Game_GetFrameCount); lua_setfield(g_L, -2, "GetFrameCount");
     lua_pushcfunction(g_L, Game_GetNumPlayers); lua_setfield(g_L, -2, "GetNumPlayers");
     lua_pushcfunction(g_L, Game_Spawn); lua_setfield(g_L, -2, "Spawn");
+    lua_pushcfunction(g_L, Game_Update); lua_setfield(g_L, -2, "Update");
+    lua_pushcfunction(g_L, Game_StartRoomTransition); lua_setfield(g_L, -2, "StartRoomTransition");
     lua_pushcfunction(g_L, Game_GetHUD); lua_setfield(g_L, -2, "GetHUD");
     lua_pushcfunction(g_L, Game_GetSeeds); lua_setfield(g_L, -2, "GetSeeds");
     lua_pushcfunction(g_L, Game_GetItemPool); lua_setfield(g_L, -2, "GetItemPool");
@@ -2906,9 +3080,10 @@ Game = setmetatable({}, {
     lua_pushcfunction(g_L, Level_IsPreAscent); lua_setfield(g_L, -2, "IsPreAscent");
     lua_pushcfunction(g_L, Level_UncoverHiddenDoor); lua_setfield(g_L, -2, "UncoverHiddenDoor");
     lua_pushcfunction(g_L, Level_MakeRedRoomDoor); lua_setfield(g_L, -2, "MakeRedRoomDoor");
+    lua_pushcfunction(g_L, Level_ChangeRoom); lua_setfield(g_L, -2, "ChangeRoom");
     lua_pushcfunction(g_L, Level_GetStateFlag); lua_setfield(g_L, -2, "GetStateFlag");
     lua_pushcfunction(g_L, Level_GetCanSeeEverything); lua_setfield(g_L, -2, "GetCanSeeEverything");
-    lua_pushvalue(g_L, -1); lua_setfield(g_L, -2, "__index");
+    lua_pushcfunction(g_L, Level_index); lua_setfield(g_L, -2, "__index");
     lua_pop(g_L, 1);
 
     // Create Isaac Global Table

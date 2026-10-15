@@ -6,6 +6,7 @@
 
 #import <mach-o/dyld.h>
 #import <mach-o/loader.h>
+#import <mach/mach.h>
 #import <objc/runtime.h>
 #import <QuartzCore/QuartzCore.h>
 #include <string>
@@ -718,9 +719,50 @@ void RepogonRenderPlanetariumIcon(float x, float y) {
 }
 
 // In-Game Native Render Pipeline Hook & Performance Monitor
-typedef void (*IsaacRenderFunc_t)(void *context);
-static IsaacRenderFunc_t g_orig_IsaacRender = nullptr;
 static void (*g_orig_IsaacShell_draw)(id, SEL, BOOL) = nullptr;
+
+float RepogonGetPlanetariumChance(void) {
+    uintptr_t game = RepogonGetGame();
+    if (!game) return 0.01f;
+    float chance = 0.01f;
+    SafeRead(game + 0x24BA4, chance);
+    return chance;
+}
+
+void RepogonPatchFoundHUDPlanetarium(void) {
+    static bool s_patched = false;
+    if (s_patched) return;
+    uintptr_t base = RepogonGetBaseAddress();
+    if (!base) return;
+
+    // In FoundHUD::Render:
+    // 1) 0x1006efb98: change b.eq #0x1006efbec to nop (0xd503201f) so icon 8 (Planetarium) is rendered
+    // 2) 0x1006efc74: change skip check to:
+    //    cmp w27, #9     (0x7100277f)
+    //    b.eq #0x1006eff08 (0x54001480)
+    //    nop             (0xd503201f)
+    uintptr_t pageAddr = (base + 0x6EF000) & ~0x3FFF;
+    vm_size_t pageSize = 0x4000;
+    kern_return_t kr = vm_protect(mach_task_self(), (vm_address_t)pageAddr, pageSize, 0, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY);
+    if (kr == KERN_SUCCESS) {
+        // 1. Icon patch: nop at base + 0x6EFB98
+        uint32_t nopInst = 0xd503201f;
+        SafeWrite(base + 0x6EFB98, nopInst);
+
+        // 2. Text patch: cmp w27, #9; b.eq #0x1006eff08; nop
+        uint32_t cmp9 = 0x7100277f;
+        uint32_t beqSkip = 0x54001480;
+        SafeWrite(base + 0x6EFC74, cmp9);
+        SafeWrite(base + 0x6EFC78, beqSkip);
+        SafeWrite(base + 0x6EFC7C, nopInst);
+
+        vm_protect(mach_task_self(), (vm_address_t)pageAddr, pageSize, 0, VM_PROT_READ | VM_PROT_EXECUTE);
+        s_patched = true;
+        RepogonLog(@"[FoundHUD] Successfully patched FoundHUD for native Planetarium Chance icon & text!");
+    } else {
+        RepogonLog(@"[FoundHUD] Warning: vm_protect failed: %d", kr);
+    }
+}
 
 static void RenderFPSOverlay(void) {
     static uint32_t s_frameCount = 0;
@@ -745,36 +787,34 @@ static void RenderFPSOverlay(void) {
     RepogonRenderTextNative(fpsBuf, 220.0f, 8.0f, r, g, b, 0.9f);
 }
 
-static void RepogonHooked_IsaacRender(void *context) {
-    // 1. Let Isaac finish rendering the room, entities, and native HUD
-    if (g_orig_IsaacRender) {
-        g_orig_IsaacRender(context);
-    }
-
-    // 2. We are now AT THE END of Isaac's render pass, BEFORE Present()!
-    //    Metal/GL framebuffer is open, bound, and in 2D screen coordinates.
-    //    Dispatch Lua render callbacks and FPS overlay:
-    @autoreleasepool {
-        RepogonLuaDispatchRender();
-        RenderFPSOverlay();
-    }
-}
-
 static void RepogonHooked_IsaacShell_draw(id self, SEL _cmd, BOOL arg1) {
-    // Hook the internal render callback [self + 0x58] on the IsaacShell instance
-    if (self) {
-        uintptr_t *pRenderFunc = reinterpret_cast<uintptr_t *>(reinterpret_cast<uintptr_t>(self) + 0x58);
-        if (*pRenderFunc && *pRenderFunc != reinterpret_cast<uintptr_t>(RepogonHooked_IsaacRender)) {
-            g_orig_IsaacRender = reinterpret_cast<IsaacRenderFunc_t>(*pRenderFunc);
-            *pRenderFunc = reinterpret_cast<uintptr_t>(RepogonHooked_IsaacRender);
-        }
-    }
-
     // Tick game events in exact lockstep with Isaac's own frame
     RepogonTick();
 
+    // Native FoundHUD Planetarium patch & stat update
+    RepogonPatchFoundHUDPlanetarium();
+    uintptr_t base = RepogonGetBaseAddress();
+    if (base) {
+        uintptr_t gameRoot = 0;
+        if (SafeRead(base + kGameRootGlobalRVA, gameRoot) && gameRoot) {
+            uintptr_t foundHud = gameRoot + 0xC59E8;
+            uintptr_t vtbl = 0;
+            if (SafeRead(foundHud, vtbl) && vtbl) {
+                float planetChance = RepogonGetPlanetariumChance() * 100.0f;
+                SafeWrite(foundHud + 0x1A0, planetChance);
+            }
+        }
+    }
+
     if (g_orig_IsaacShell_draw) {
         g_orig_IsaacShell_draw(self, _cmd, arg1);
+    }
+
+    // Isaac frame render is complete and OpenGL ES framebuffer is active in 2D screen coordinates!
+    // Dispatch Lua render callbacks (MC_POST_RENDER and MC_HUD_RENDER)
+    @autoreleasepool {
+        RepogonLuaDispatchRender();
+        RenderFPSOverlay();
     }
 }
 
@@ -798,4 +838,5 @@ void RepogonRenderHookInit(void) {
     s_hooked = true;
     RepogonLog(@"[RenderHook] Successfully hooked -[IsaacShell draw:] -> Native in-game KAGE rendering active!");
 }
+
 
