@@ -1,5 +1,5 @@
 # Isaac REPENTOGON iOS
-_note: everything here is made by antigravity_
+_note: everything here is made by antigravity. really not worth looking into and considered a failed project in my opinion._
 
 
 **REPENTOGON / Lua Modding Runtime & Script Loader for The Binding of Isaac on iOS**
